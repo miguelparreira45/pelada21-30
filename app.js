@@ -22,6 +22,7 @@ const els = {
   rightPanel: document.querySelector("#rightPanel"),
   timer: document.querySelector("#timer"),
   startCountdown: document.querySelector("#startCountdown"),
+  endTimedMatch: document.querySelector("#endTimedMatch"),
   matchLabel: document.querySelector("#matchLabel"),
   benchStrip: document.querySelector("#benchStrip"),
   goalForm: document.querySelector("#goalForm"),
@@ -156,7 +157,8 @@ function renderMatch() {
   els.leftPanel.innerHTML = renderTeamPanel(left);
   els.rightPanel.innerHTML = renderTeamPanel(right);
   els.timer.textContent = formatClock(match.remaining);
-  els.startCountdown.classList.toggle("hidden", match.isRunning);
+  els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
+  els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
   renderBench();
   renderGoalForm();
   renderStats();
@@ -187,7 +189,7 @@ function renderBench() {
 
 function renderGoalForm() {
   const active = activeTeamKeys();
-  const canRegisterGoal = Boolean(state.currentMatch?.isRunning);
+  const canRegisterGoal = Boolean(state.currentMatch?.isRunning || state.currentMatch?.isTimeUp);
   els.goalTeam.innerHTML = active.map((key) => `<option value="${key}">${TEAM_META[key].name}</option>`).join("");
   if (!active.includes(els.goalTeam.value)) els.goalTeam.value = active[0];
   fillPlayerOptions();
@@ -257,7 +259,12 @@ function startTimer() {
     state.currentMatch.remaining -= 1;
     els.timer.textContent = formatClock(state.currentMatch.remaining);
     if (state.currentMatch.remaining <= 0) {
-      finishCurrentMatch("time");
+      state.currentMatch.remaining = 0;
+      state.currentMatch.isRunning = false;
+      state.currentMatch.isTimeUp = true;
+      clearInterval(timerId);
+      render();
+      return;
     }
     saveState();
   }, 1000);
@@ -277,6 +284,7 @@ function startMatch(playing, bench) {
     goals: [],
     remaining: MATCH_SECONDS,
     isRunning: false,
+    isTimeUp: false,
     startedAt: new Date().toISOString()
   };
   state.finishedMatch = null;
@@ -286,7 +294,7 @@ function startMatch(playing, bench) {
 
 function registerGoal(event) {
   event.preventDefault();
-  if (!state.currentMatch?.isRunning) return;
+  if (!state.currentMatch?.isRunning && !state.currentMatch?.isTimeUp) return;
   const teamKey = els.goalTeam.value;
   const scorer = els.goalPlayer.value;
   const assistant = els.assistPlayer.value;
@@ -441,6 +449,7 @@ els.teamsGrid.addEventListener("click", (event) => {
 
 els.drawMatch.addEventListener("click", startFirstMatch);
 els.startCountdown.addEventListener("click", startCountdown);
+els.endTimedMatch.addEventListener("click", () => finishCurrentMatch("time"));
 els.goalTeam.addEventListener("change", fillPlayerOptions);
 els.goalForm.addEventListener("submit", registerGoal);
 els.nextMatch.addEventListener("click", () => {
