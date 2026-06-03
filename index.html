@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Placar da Pelada</title>
+    <link rel="stylesheet" href="app.css">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Pelada</p>
+          <h1>Placar da Pelada</h1>
+        </div>
+        <button class="icon-button danger-ghost" id="resetApp" title="Zerar pelada" aria-label="Zerar pelada">↺</button>
+      </header>
+
+      <section class="setup-view" id="setupView">
+        <div class="section-head">
+          <div>
+            <h2>Times</h2>
+            <p>Monte azul, vermelho e verde antes do sorteio.</p>
+          </div>
+          <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
+        </div>
+
+        <div class="teams-grid" id="teamsGrid"></div>
+      </section>
+
+      <section class="match-view hidden" id="matchView">
+        <div class="scoreboard">
+          <article class="team-panel" id="leftPanel"></article>
+          <div class="timer-panel">
+            <p class="match-label" id="matchLabel">Partida 1</p>
+            <div class="timer" id="timer">07:00</div>
+            <p class="rule">2 gols ou 7 minutos</p>
+            <button class="primary-action timer-action" id="startCountdown">Iniciar contagem</button>
+          </div>
+          <article class="team-panel" id="rightPanel"></article>
+        </div>
+
+        <div class="bench-strip" id="benchStrip"></div>
+
+        <div class="match-tools">
+          <section class="tool-panel">
+            <div class="panel-title">
+              <h2>Registrar lance</h2>
+              <p>Gol e assistencia entram no relatorio final.</p>
+            </div>
+
+            <form id="goalForm" class="goal-form">
+              <label>
+                Time do gol
+                <select id="goalTeam"></select>
+              </label>
+              <label>
+                Gol de
+                <select id="goalPlayer"></select>
+              </label>
+              <label>
+                Assistencia
+                <select id="assistPlayer"></select>
+              </label>
+              <button class="primary-action" type="submit">Marcar gol</button>
+            </form>
+          </section>
+
+          <section class="tool-panel">
+            <div class="panel-title">
+              <h2>Resumo da pelada</h2>
+              <p id="runningSummary">Nenhum gol marcado ainda.</p>
+            </div>
+            <div class="stats-list" id="statsList"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="ended-view hidden" id="endedView">
+        <div class="result-band" id="resultBand"></div>
+        <div class="winner-choice hidden" id="winnerChoice"></div>
+        <div class="next-actions">
+          <button class="primary-action big" id="nextMatch">Iniciar nova partida</button>
+          <button class="secondary-action" id="finishSession">Finalizar pelada</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

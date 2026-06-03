@@ -1,0 +1,11 @@
+[core]
+	repositoryformatversion = 0
+	filemode = false
+	bare = false
+	logallrefupdates = true
+	worktree = C:/Users/thiag/Documents/Codex/2026-06-03/quero-criar-um-sistema-de-contabilizar
+	symlinks = false
+	ignorecase = true
+[user]
+	name = Thiago
+	email = thiago@example.com
