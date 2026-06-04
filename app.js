@@ -26,7 +26,12 @@ const els = {
   profileUser: document.querySelector("#profileUser"),
   profileName: document.querySelector("#profileName"),
   gameTab: document.querySelector("#gameTab"),
+  playersTab: document.querySelector("#playersTab"),
   dataTab: document.querySelector("#dataTab"),
+  playerProfileForm: document.querySelector("#playerProfileForm"),
+  playerFormTitle: document.querySelector("#playerFormTitle"),
+  registeredPlayers: document.querySelector("#registeredPlayers"),
+  cancelPlayerEdit: document.querySelector("#cancelPlayerEdit"),
   setupView: document.querySelector("#setupView"),
   matchView: document.querySelector("#matchView"),
   endedView: document.querySelector("#endedView"),
@@ -102,6 +107,7 @@ function newDraft() {
 
 function ensureProfileDefaults(item) {
   item.sessions ||= [];
+  item.players ||= [];
   item.seasons ||= [];
   if (!item.seasons.length) {
     item.seasons.push({
@@ -162,7 +168,9 @@ function showAppTab(tab) {
     button.classList.toggle("active", button.dataset.appTab === tab);
   });
   els.gameTab.classList.toggle("hidden", tab !== "game");
+  els.playersTab.classList.toggle("hidden", tab !== "players");
   els.dataTab.classList.toggle("hidden", tab !== "data");
+  if (tab === "players") renderPlayers();
   if (tab === "data") renderData();
 }
 
@@ -178,15 +186,41 @@ function benchTeamKey() {
   return draft.currentMatch?.bench || draft.finishedMatch?.bench;
 }
 
-function playerId(teamKey, name) {
-  return `${teamKey}:${name.trim().toLowerCase()}`;
+function findPlayer(ref) {
+  return profile?.players?.find((item) => item.id === ref) || null;
 }
 
-function ensurePlayerStats(teamKey, name) {
-  const id = playerId(teamKey, name);
+function playerDisplayName(ref) {
+  const player = findPlayer(ref);
+  if (player) return `${player.firstName} ${player.lastName}`.trim();
+  return String(ref);
+}
+
+function playerStatId(ref) {
+  const player = findPlayer(ref);
+  return player ? player.id : String(ref).trim().toLowerCase();
+}
+
+function playerType(ref) {
+  return findPlayer(ref)?.memberType || "suplente";
+}
+
+function playerPhoto(ref) {
+  return findPlayer(ref)?.photo || "";
+}
+
+function legacyPlayerId(teamKey, name) {
+  return `${teamKey}:${String(name).trim().toLowerCase()}`;
+}
+
+function ensurePlayerStats(teamKey, ref) {
+  const id = playerStatId(ref);
+  const name = playerDisplayName(ref);
   if (!draft.playerStats[id]) {
-    draft.playerStats[id] = { id, name, teamKey, goals: 0, assists: 0, wins: 0 };
+    draft.playerStats[id] = { id, playerId: id, name, teamKey, goals: 0, assists: 0, wins: 0 };
   }
+  draft.playerStats[id].name = name;
+  draft.playerStats[id].teamKey = teamKey;
   return draft.playerStats[id];
 }
 
@@ -365,10 +399,11 @@ function renderSetup() {
     const meta = TEAM_META[key];
     const players = draft.teams[key].players;
     const list = players.length
-      ? players.map((name) => `
-          <div class="player-pill">
-            <span>${escapeHtml(name)}</span>
-            <button class="remove-player" data-team="${key}" data-player="${escapeHtml(name)}" title="Remover ${escapeHtml(name)}">x</button>
+      ? players.map((ref) => `
+          <div class="player-pill ${playerType(ref)}">
+            ${renderPlayerAvatar(ref)}
+            <span>${escapeHtml(playerDisplayName(ref))}</span>
+            <button class="remove-player" data-team="${key}" data-player="${escapeHtml(ref)}" title="Remover ${escapeHtml(playerDisplayName(ref))}">x</button>
           </div>
         `).join("")
       : "<p>Nenhum jogador</p>";
@@ -377,15 +412,142 @@ function renderSetup() {
       <article class="team-card" style="--team-color: ${meta.color}">
         <div class="team-title"><span class="swatch"></span><h3>${meta.name}</h3></div>
         <form class="player-form" data-team-form="${key}">
-          <input name="player" placeholder="Nome do jogador" autocomplete="off">
+          <select name="player" ${availablePlayersForTeam(key).length ? "" : "disabled"}>
+            ${renderPlayerOptions(key)}
+          </select>
           <button class="icon-button" title="Adicionar jogador">+</button>
         </form>
+        ${profile.players.length ? "" : `<p>Cadastre jogadores na aba Jogadores.</p>`}
         <div class="player-list">${list}</div>
       </article>
     `;
   }).join("");
 
   els.drawMatch.disabled = !profile.currentSeasonId || !teamKeys().every((key) => draft.teams[key].players.length > 0);
+}
+
+function selectedPlayerRefs() {
+  return teamKeys().flatMap((key) => draft.teams[key].players);
+}
+
+function availablePlayersForTeam(teamKey) {
+  const selected = selectedPlayerRefs();
+  return profile.players.filter((player) => !selected.includes(player.id));
+}
+
+function renderPlayerOptions(teamKey) {
+  const available = availablePlayersForTeam(teamKey);
+  if (!available.length) return `<option value="">Sem jogadores disponiveis</option>`;
+  return `<option value="">Escolha um jogador</option>` + available.map((player) =>
+    `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</option>`
+  ).join("");
+}
+
+function renderPlayerAvatar(ref) {
+  const photo = playerPhoto(ref);
+  const name = playerDisplayName(ref);
+  if (photo) return `<img class="player-avatar" src="${photo}" alt="${escapeHtml(name)}">`;
+  return `<span class="player-avatar placeholder">${escapeHtml(name.slice(0, 1).toUpperCase())}</span>`;
+}
+
+function renderPlayers() {
+  els.playerFormTitle.textContent = els.playerProfileForm.elements.playerId.value ? "Editar jogador" : "Novo jogador";
+  els.cancelPlayerEdit.classList.toggle("hidden", !els.playerProfileForm.elements.playerId.value);
+
+  if (!profile.players.length) {
+    els.registeredPlayers.innerHTML = "<p>Nenhum jogador cadastrado ainda.</p>";
+    return;
+  }
+
+  els.registeredPlayers.innerHTML = profile.players
+    .slice()
+    .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
+    .map((player) => `
+      <article class="registered-player ${player.memberType}">
+        ${renderPlayerAvatar(player.id)}
+        <div>
+          <strong>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</strong>
+          <span>${player.memberType === "mensalista" ? "Mensalista" : "Suplente"}</span>
+        </div>
+        <div class="card-actions">
+          <button class="secondary-action" data-edit-player="${player.id}">Editar</button>
+          <button class="danger-action" data-delete-player="${player.id}">Remover</button>
+        </div>
+      </article>
+    `).join("");
+}
+
+function readPhotoFile(file) {
+  return new Promise((resolve) => {
+    if (!file) return resolve("");
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => resolve("");
+    reader.readAsDataURL(file);
+  });
+}
+
+async function savePlayerProfile(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const data = new FormData(form);
+  const id = data.get("playerId") || crypto.randomUUID();
+  const existing = profile.players.find((player) => player.id === id);
+  const file = form.elements.photo.files[0];
+  const photo = file ? await readPhotoFile(file) : existing?.photo || "";
+  const player = {
+    id,
+    firstName: data.get("firstName").trim(),
+    lastName: data.get("lastName").trim(),
+    memberType: data.get("memberType"),
+    photo,
+    createdAt: existing?.createdAt || new Date().toISOString()
+  };
+
+  if (!player.firstName || !player.lastName) return;
+  if (existing) Object.assign(existing, player);
+  else profile.players.push(player);
+
+  profile.sessions.forEach((session) => {
+    session.stats.forEach((stat) => {
+      if (stat.id === player.id || stat.playerId === player.id) {
+        stat.name = `${player.firstName} ${player.lastName}`.trim();
+        stat.playerId = player.id;
+      }
+    });
+    recalculateSession(session);
+  });
+
+  form.reset();
+  form.elements.playerId.value = "";
+  saveStore();
+  renderPlayers();
+  render();
+}
+
+function editPlayerProfile(playerId) {
+  const player = profile.players.find((item) => item.id === playerId);
+  if (!player) return;
+  els.playerProfileForm.elements.playerId.value = player.id;
+  els.playerProfileForm.elements.firstName.value = player.firstName;
+  els.playerProfileForm.elements.lastName.value = player.lastName;
+  els.playerProfileForm.elements.memberType.value = player.memberType;
+  renderPlayers();
+}
+
+function deletePlayerProfile(playerId) {
+  const inUse = selectedPlayerRefs().includes(playerId) || profile.sessions.some((session) =>
+    session.stats.some((stat) => stat.id === playerId || stat.playerId === playerId)
+  );
+  if (inUse) {
+    alert("Este jogador ja aparece em times ou historico. Edite os dados dele em vez de remover.");
+    return;
+  }
+  if (!confirm("Remover este jogador cadastrado?")) return;
+  profile.players = profile.players.filter((player) => player.id !== playerId);
+  saveStore();
+  renderPlayers();
+  render();
 }
 
 function renderSeasonControls() {
@@ -416,7 +578,7 @@ function renderMatch() {
 function renderTeamPanel(teamKey) {
   const meta = TEAM_META[teamKey];
   const score = draft.currentMatch.score[teamKey];
-  const players = draft.teams[teamKey].players.map((player) => `<span class="mini-pill">${escapeHtml(player)}</span>`).join("");
+  const players = draft.teams[teamKey].players.map((ref) => `<span class="mini-pill ${playerType(ref)}">${escapeHtml(playerDisplayName(ref))}</span>`).join("");
   return `
     <p class="eyebrow">Time ${meta.name}</p>
     <div class="score" data-score-team="${teamKey}">${score}</div>
@@ -446,8 +608,8 @@ function renderGoalForm() {
 function fillPlayerOptions() {
   const teamKey = els.goalTeam.value;
   const players = draft.teams[teamKey]?.players || [];
-  els.goalPlayer.innerHTML = players.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-  els.assistPlayer.innerHTML = `<option value="">Sem assistencia</option>` + players.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  els.goalPlayer.innerHTML = players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
+  els.assistPlayer.innerHTML = `<option value="">Sem assistencia</option>` + players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
 }
 
 function renderStats() {
@@ -735,6 +897,7 @@ function renderData() {
     ${editingSessionId ? renderSessionEditor(editingSessionId) : ""}
     <section class="data-card">
       <h3>${escapeHtml(title)}</h3>
+      ${activeDataTab === "today" ? `<p>Historico de partidas finalizadas hoje.</p>` : renderCharts(sessions)}
       <div class="leader-grid">
         <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
         <div class="leader-box"><span>Assistencias</span><strong>${escapeHtml(ranking.topAssistant.label)}</strong></div>
@@ -742,11 +905,45 @@ function renderData() {
       </div>
     </section>
     <section class="data-card">
-      <h3>Peladas registradas</h3>
+      <h3>${activeDataTab === "today" ? "Histórico de partidas do dia" : "Peladas registradas"}</h3>
       <div class="data-list">
         ${sessions.length ? sessions.slice().reverse().map(renderSessionCard).join("") : "<p>Nenhuma pelada finalizada ainda.</p>"}
       </div>
     </section>
+  `;
+}
+
+function renderCharts(sessions) {
+  const stats = buildOverallStats(sessions);
+  return `
+    <div class="charts-grid">
+      ${renderChart("Disputa pela artilharia", stats, "goals")}
+      ${renderChart("Disputa por assistencias", stats, "assists")}
+      ${renderChart("Disputa pe quente", stats, "wins")}
+    </div>
+  `;
+}
+
+function renderChart(title, stats, field) {
+  const ordered = stats
+    .filter((item) => item[field] > 0)
+    .sort((a, b) => b[field] - a[field] || a.name.localeCompare(b.name))
+    .slice(0, 10);
+  const max = Math.max(1, ...ordered.map((item) => item[field]));
+  if (!ordered.length) {
+    return `<div class="chart-card"><h4>${title}</h4><p>Sem dados ainda.</p></div>`;
+  }
+  return `
+    <div class="chart-card">
+      <h4>${title}</h4>
+      ${ordered.map((item) => `
+        <div class="bar-row">
+          <span>${escapeHtml(item.name)}</span>
+          <div class="bar-track"><i style="width: ${(item[field] / max) * 100}%"></i></div>
+          <strong>${item[field]}</strong>
+        </div>
+      `).join("")}
+    </div>
   `;
 }
 
@@ -843,20 +1040,24 @@ function renderSessionEditor(sessionId) {
 }
 
 function buildOverall(sessions) {
-  const total = {};
-  sessions.flatMap((session) => session.stats).forEach((item) => {
-    const key = item.name.toLowerCase();
-    if (!total[key]) total[key] = { name: item.name, goals: 0, assists: 0, wins: 0 };
-    total[key].goals += item.goals;
-    total[key].assists += item.assists;
-    total[key].wins += item.wins;
-  });
-  const stats = Object.values(total);
+  const stats = buildOverallStats(sessions);
   return {
     topScorer: topBy(stats, "goals", "Sem gols"),
     topAssistant: topBy(stats, "assists", "Sem assistencias"),
     topHot: topBy(stats, "wins", "Sem vitorias")
   };
+}
+
+function buildOverallStats(sessions) {
+  const total = {};
+  sessions.flatMap((session) => session.stats).forEach((item) => {
+    const key = item.playerId || item.id || item.name.toLowerCase();
+    if (!total[key]) total[key] = { name: item.name, goals: 0, assists: 0, wins: 0 };
+    total[key].goals += item.goals;
+    total[key].assists += item.assists;
+    total[key].wins += item.wins;
+  });
+  return Object.values(total);
 }
 
 function deleteSession(sessionId) {
@@ -903,10 +1104,10 @@ function recalculateSession(session) {
   session.matches.forEach((match) => {
     if (!match.winner) return;
     session.winsByTeam[match.winner] += 1;
-    session.teams[match.winner].players.forEach((name) => {
-      const id = playerId(match.winner, name);
+    session.teams[match.winner].players.forEach((ref) => {
+      const id = playerStatId(ref);
       if (!statsById[id]) {
-        statsById[id] = { id, name, teamKey: match.winner, goals: 0, assists: 0, wins: 0 };
+        statsById[id] = { id, playerId: id, name: playerDisplayName(ref), teamKey: match.winner, goals: 0, assists: 0, wins: 0 };
         session.stats.push(statsById[id]);
       }
       statsById[id].wins += 1;
@@ -1053,12 +1254,11 @@ els.teamsGrid.addEventListener("submit", (event) => {
   if (!form) return;
   event.preventDefault();
   const teamKey = form.dataset.teamForm;
-  const input = form.elements.player;
-  const name = input.value.trim();
-  if (!name || draft.teams[teamKey].players.includes(name)) return;
-  draft.teams[teamKey].players.push(name);
-  ensurePlayerStats(teamKey, name);
-  input.value = "";
+  const ref = form.elements.player.value;
+  if (!ref || draft.teams[teamKey].players.includes(ref)) return;
+  draft.teams[teamKey].players.push(ref);
+  ensurePlayerStats(teamKey, ref);
+  form.elements.player.value = "";
   render();
 });
 
@@ -1066,9 +1266,9 @@ els.teamsGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-player]");
   if (!button) return;
   const teamKey = button.dataset.team;
-  const name = button.dataset.player;
-  draft.teams[teamKey].players = draft.teams[teamKey].players.filter((player) => player !== name);
-  delete draft.playerStats[playerId(teamKey, name)];
+  const ref = button.dataset.player;
+  draft.teams[teamKey].players = draft.teams[teamKey].players.filter((player) => player !== ref);
+  delete draft.playerStats[playerStatId(ref)];
   render();
 });
 
@@ -1084,6 +1284,21 @@ els.winnerChoice.addEventListener("click", (event) => {
   if (button) chooseWinner(button.dataset.winner);
 });
 els.newSession.addEventListener("click", resetDraft);
+els.playerProfileForm.addEventListener("submit", savePlayerProfile);
+els.cancelPlayerEdit.addEventListener("click", () => {
+  els.playerProfileForm.reset();
+  els.playerProfileForm.elements.playerId.value = "";
+  renderPlayers();
+});
+els.registeredPlayers.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-edit-player]");
+  if (editButton) {
+    editPlayerProfile(editButton.dataset.editPlayer);
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-player]");
+  if (deleteButton) deletePlayerProfile(deleteButton.dataset.deletePlayer);
+});
 els.dataGrid.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-session]");
   if (editButton) {

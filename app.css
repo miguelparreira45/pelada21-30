@@ -289,7 +289,8 @@ p {
 .setup-view,
 .match-view,
 .ended-view,
-.data-tab {
+.data-tab,
+.players-tab {
   display: grid;
   gap: 18px;
   animation: riseIn .45s ease both;
@@ -357,6 +358,64 @@ p {
   grid-template-columns: 1fr auto;
   gap: 8px;
   margin: 14px 0;
+}
+
+.players-layout {
+  display: grid;
+  grid-template-columns: .82fr 1.18fr;
+  gap: 14px;
+}
+
+.player-profile-form,
+.registered-players {
+  display: grid;
+  gap: 12px;
+}
+
+.registered-player {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.registered-player strong,
+.player-pill.mensalista span,
+.mini-pill.mensalista {
+  color: var(--green);
+}
+
+.registered-player.suplente strong,
+.player-pill.suplente span,
+.mini-pill.suplente {
+  color: #aeb6aa;
+}
+
+.registered-player span {
+  display: block;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.player-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: #151915;
+}
+
+.player-avatar.placeholder {
+  display: inline-grid;
+  place-items: center;
+  color: var(--green);
+  font-weight: 950;
 }
 
 .player-list,
@@ -552,6 +611,44 @@ p {
   font-size: 22px;
 }
 
+.charts-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+
+.chart-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.bar-row {
+  display: grid;
+  grid-template-columns: minmax(82px, .8fr) minmax(90px, 1fr) 34px;
+  gap: 8px;
+  align-items: center;
+  margin: 9px 0;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.bar-track {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #1c231b;
+}
+
+.bar-track i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--green-2), var(--green));
+}
+
 .card-actions {
   display: flex;
   align-items: center;
@@ -616,16 +713,19 @@ p {
   .auth-shell,
   .teams-grid,
   .setup-options,
+  .players-layout,
   .scoreboard,
   .match-tools,
   .goal-form,
   .data-grid,
-  .leader-grid {
+  .leader-grid,
+  .charts-grid {
     grid-template-columns: 1fr;
   }
 
   .editor-grid,
-  .editor-player {
+  .editor-player,
+  .registered-player {
     grid-template-columns: 1fr;
   }
 

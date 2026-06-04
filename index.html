@@ -78,6 +78,7 @@
         </div>
         <nav class="main-nav">
           <button class="tab-button active" data-app-tab="game">Jogo</button>
+          <button class="tab-button" data-app-tab="players">Jogadores</button>
           <button class="tab-button" data-app-tab="data">Dados</button>
           <button class="secondary-action" id="logoutButton">Sair</button>
         </nav>
@@ -172,6 +173,40 @@
         </section>
 
         <section class="final-view hidden" id="finalView"></section>
+      </section>
+
+      <section class="players-tab hidden" id="playersTab">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Elenco da pelada</p>
+            <h2>Cadastro de jogadores</h2>
+          </div>
+        </div>
+        <div class="players-layout">
+          <section class="data-card">
+            <h3 id="playerFormTitle">Novo jogador</h3>
+            <form class="player-profile-form" id="playerProfileForm">
+              <input type="hidden" name="playerId">
+              <label>Nome<input name="firstName" required></label>
+              <label>Sobrenome<input name="lastName" required></label>
+              <label>Tipo
+                <select name="memberType">
+                  <option value="mensalista">Mensalista</option>
+                  <option value="suplente">Suplente</option>
+                </select>
+              </label>
+              <label>Foto de perfil<input name="photo" type="file" accept="image/*"></label>
+              <div class="card-actions">
+                <button class="primary-action" type="submit">Salvar jogador</button>
+                <button class="secondary-action hidden" id="cancelPlayerEdit" type="button">Cancelar edição</button>
+              </div>
+            </form>
+          </section>
+          <section class="data-card">
+            <h3>Jogadores cadastrados</h3>
+            <div class="registered-players" id="registeredPlayers"></div>
+          </section>
+        </div>
       </section>
 
       <section class="data-tab hidden" id="dataTab">
