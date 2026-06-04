@@ -28,6 +28,7 @@ const els = {
   resetForm: document.querySelector("#resetForm"),
   profileUser: document.querySelector("#profileUser"),
   profileName: document.querySelector("#profileName"),
+  syncBadge: document.querySelector("#syncBadge"),
   gameTab: document.querySelector("#gameTab"),
   playersTab: document.querySelector("#playersTab"),
   dataTab: document.querySelector("#dataTab"),
@@ -450,6 +451,20 @@ function setAuthMessage(message, isError = false) {
   els.authMessage.style.color = isError ? "#ff7777" : "var(--green)";
 }
 
+function setSyncStatus(message, mode = "cloud") {
+  if (!els.syncBadge) return;
+  els.syncBadge.textContent = message;
+  els.syncBadge.className = `sync-badge ${mode}`;
+}
+
+function setAuthModeMessage() {
+  if (isCloudMode) {
+    setAuthMessage("Conectado na nuvem. Seus dados aparecem no celular e no computador.");
+  } else {
+    setAuthMessage("Modo local: este aparelho nao esta conectado ao Supabase. Suba tambem index.html e supabase-config.js.", true);
+  }
+}
+
 function showAuthTab(tab) {
   document.querySelectorAll("[data-auth-tab]").forEach((button) => {
     button.classList.toggle("active", button.dataset.authTab === tab);
@@ -458,7 +473,7 @@ function showAuthTab(tab) {
   if (tab === "login") els.loginForm.classList.remove("hidden");
   if (tab === "register") els.registerForm.classList.remove("hidden");
   if (tab === "recover") els.recoverForm.classList.remove("hidden");
-  setAuthMessage("");
+  setAuthModeMessage();
 }
 
 function showAppTab(tab) {
@@ -725,6 +740,7 @@ function enterProfile(nextProfile) {
   els.appShell.classList.remove("hidden");
   els.profileUser.textContent = `@${profile.username}`;
   els.profileName.textContent = profile.peladaName;
+  setSyncStatus(isCloudMode ? "Nuvem ativa" : "Modo local", isCloudMode ? "cloud" : "local");
   showAppTab("game");
   render();
 }
@@ -1747,7 +1763,16 @@ async function initApp() {
   isCloudMode = Boolean(supabaseClient);
 
   if (isCloudMode) {
-    const { data } = await supabaseClient.auth.getSession();
+    let data;
+    try {
+      const response = await supabaseClient.auth.getSession();
+      data = response.data;
+    } catch (error) {
+      isCloudMode = false;
+      console.warn("Supabase nao carregou", error);
+      showAuthTab("login");
+      return;
+    }
     if (data.session?.user) {
       try {
         currentUser = data.session.user;

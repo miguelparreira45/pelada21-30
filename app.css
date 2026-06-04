@@ -250,6 +250,30 @@ select {
   width: 168px;
 }
 
+.sync-badge {
+  display: inline-flex;
+  width: fit-content;
+  margin-top: 8px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.sync-badge.cloud {
+  color: #071006;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.sync-badge.local {
+  color: #ffd7d7;
+  background: #271112;
+  border-color: #633034;
+}
+
 .eyebrow,
 .match-label {
   margin: 0 0 5px;
