@@ -14,6 +14,9 @@ let timerId = null;
 let pendingRecovery = null;
 let activeDataTab = "today";
 let editingSessionId = null;
+let supabaseClient = null;
+let currentUser = null;
+let isCloudMode = false;
 
 const els = {
   authShell: document.querySelector("#authShell"),
@@ -83,6 +86,301 @@ function saveStore() {
     profile.draft = draft;
   }
   localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  if (isCloudMode && profile && currentUser) {
+    queueCloudSave();
+  }
+}
+
+let cloudSaveTimer = null;
+
+function queueCloudSave() {
+  clearTimeout(cloudSaveTimer);
+  cloudSaveTimer = setTimeout(() => {
+    saveCloudState().catch((error) => console.warn("Falha ao salvar na nuvem", error));
+  }, 450);
+}
+
+function setupSupabaseClient() {
+  const config = window.PELADAFAST_SUPABASE;
+  if (!window.supabase || !config?.url || !config?.anonKey || config.url.includes("COLE_AQUI")) return null;
+  return window.supabase.createClient(config.url.replace(/\/rest\/v1\/?$/, ""), config.anonKey);
+}
+
+async function getLoginEmail(identity) {
+  const clean = identity.trim().toLowerCase();
+  if (clean.includes("@")) return clean;
+  const { data, error } = await supabaseClient.rpc("login_email_for_identity", { identity: clean });
+  if (error || !data) throw new Error("Usuario nao encontrado.");
+  return data;
+}
+
+async function loadCloudProfile(user) {
+  const { data: profileRow, error: profileError } = await supabaseClient
+    .from("pelada_profiles")
+    .select("*")
+    .eq("id", user.id)
+    .maybeSingle();
+  if (profileError) throw profileError;
+  if (!profileRow) return null;
+
+  const [{ data: seasons }, { data: players }, { data: sessions }] = await Promise.all([
+    supabaseClient.from("seasons").select("*").eq("profile_id", user.id).order("created_at"),
+    supabaseClient.from("players").select("*").eq("profile_id", user.id).order("created_at"),
+    supabaseClient.from("sessions").select("*").eq("profile_id", user.id).order("played_at")
+  ]);
+
+  const mappedSeasons = (seasons || []).map(fromSeasonRow);
+  const mappedSessions = (sessions || []).map((row) => fromSessionRow(row, mappedSeasons));
+
+  return ensureProfileDefaults({
+    id: user.id,
+    peladaName: profileRow.pelada_name,
+    username: profileRow.username,
+    email: profileRow.email,
+    phone: profileRow.phone,
+    currentSeasonId: profileRow.current_season_id,
+    createdAt: profileRow.created_at,
+    seasons: mappedSeasons,
+    players: (players || []).map(fromPlayerRow),
+    sessions: mappedSessions,
+    draft: newDraft()
+  });
+}
+
+function fromSeasonRow(row) {
+  return { id: row.id, name: row.name, createdAt: row.created_at };
+}
+
+function fromPlayerRow(row) {
+  return {
+    id: row.id,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    memberType: row.member_type,
+    photo: row.photo_path || "",
+    createdAt: row.created_at
+  };
+}
+
+function fromSessionRow(row, seasons = []) {
+  return {
+    id: row.id,
+    date: row.played_at,
+    seasonId: row.season_id,
+    seasonName: seasons.find((season) => season.id === row.season_id)?.name || "Temporada",
+    settings: row.settings,
+    teams: row.teams,
+    matches: row.matches,
+    stats: row.stats,
+    ...row.summary
+  };
+}
+
+function toSessionRow(session) {
+  return {
+    id: session.id,
+    profile_id: currentUser.id,
+    season_id: session.seasonId,
+    played_at: session.date,
+    settings: session.settings || DEFAULT_SETTINGS,
+    teams: session.teams,
+    matches: session.matches,
+    stats: session.stats,
+    summary: {
+      winnerTeam: session.winnerTeam,
+      topScorer: session.topScorer,
+      topAssistant: session.topAssistant,
+      topHot: session.topHot,
+      winsByTeam: session.winsByTeam,
+      report: session.report
+    }
+  };
+}
+
+async function createCloudProfile(user, payload) {
+  const firstSeasonId = crypto.randomUUID();
+  const profileRow = {
+    id: user.id,
+    pelada_name: payload.peladaName,
+    username: payload.username,
+    email: payload.email,
+    phone: payload.phone
+  };
+  const seasonRow = {
+    id: firstSeasonId,
+    profile_id: user.id,
+    name: "Temporada principal"
+  };
+  const { error: profileError } = await supabaseClient.from("pelada_profiles").insert(profileRow);
+  if (profileError) throw profileError;
+  const { error: seasonError } = await supabaseClient.from("seasons").insert(seasonRow);
+  if (seasonError) throw seasonError;
+  const { error: updateError } = await supabaseClient
+    .from("pelada_profiles")
+    .update({ current_season_id: firstSeasonId })
+    .eq("id", user.id);
+  if (updateError) throw updateError;
+  return loadCloudProfile(user);
+}
+
+async function saveCloudState() {
+  if (!isCloudMode || !profile || !currentUser) return;
+  await supabaseClient.from("pelada_profiles").update({
+    pelada_name: profile.peladaName,
+    username: profile.username,
+    email: profile.email,
+    phone: profile.phone,
+    current_season_id: profile.currentSeasonId
+  }).eq("id", currentUser.id);
+
+  await Promise.all(profile.sessions.map((session) =>
+    supabaseClient.from("sessions").upsert(toSessionRow(session))
+  ));
+}
+
+function findLocalProfileForCloud(cloudProfile) {
+  return (store.profiles || []).find((item) =>
+    item.id !== cloudProfile.id
+    && !item.migratedToCloudUserId
+    && (
+      item.username === cloudProfile.username
+      || item.email === cloudProfile.email
+      || onlyDigits(item.phone || "") === onlyDigits(cloudProfile.phone || "")
+    )
+  );
+}
+
+async function migrateLocalProfileToCloudIfNeeded(cloudProfile) {
+  if (!isCloudMode || !currentUser) return cloudProfile;
+  const previousProfile = profile;
+  profile = cloudProfile;
+  const localProfile = findLocalProfileForCloud(cloudProfile);
+  if (!localProfile) {
+    profile = previousProfile;
+    return cloudProfile;
+  }
+
+  const shouldImport = confirm("Encontrei um perfil antigo salvo neste navegador com o mesmo usuario, email ou WhatsApp. Importar esse historico para a nuvem?");
+  if (!shouldImport) {
+    profile = previousProfile;
+    return cloudProfile;
+  }
+
+  const imported = ensureProfileDefaults(localProfile);
+  const seasonIdMap = {};
+  const existingSeasonNames = new Set(cloudProfile.seasons.map((season) => season.name.toLowerCase()));
+
+  for (const season of imported.seasons) {
+    let target = cloudProfile.seasons.find((item) => item.name.toLowerCase() === season.name.toLowerCase());
+    if (!target) {
+      target = { ...season, id: crypto.randomUUID() };
+      cloudProfile.seasons.push(target);
+      await supabaseClient.from("seasons").insert({
+        id: target.id,
+        profile_id: currentUser.id,
+        name: target.name
+      });
+      existingSeasonNames.add(target.name.toLowerCase());
+    }
+    seasonIdMap[season.id] = target.id;
+  }
+
+  const playerIdMap = {};
+  const existingPlayerNames = new Set(cloudProfile.players.map((player) => `${player.firstName} ${player.lastName}`.toLowerCase()));
+  for (const player of imported.players || []) {
+    const fullName = `${player.firstName} ${player.lastName}`.toLowerCase();
+    let target = cloudProfile.players.find((item) => `${item.firstName} ${item.lastName}`.toLowerCase() === fullName);
+    if (!target) {
+      target = { ...player, id: crypto.randomUUID() };
+      cloudProfile.players.push(target);
+      await supabaseClient.from("players").insert({
+        id: target.id,
+        profile_id: currentUser.id,
+        first_name: target.firstName,
+        last_name: target.lastName,
+        member_type: target.memberType,
+        photo_path: target.photo || null
+      });
+      existingPlayerNames.add(fullName);
+    }
+    playerIdMap[player.id] = target.id;
+  }
+
+  const remapRef = (ref) => playerIdMap[ref] || ref;
+  const importedSessions = (imported.sessions || []).map((session) => {
+    const mapped = structuredClone(session);
+    mapped.id = crypto.randomUUID();
+    mapped.seasonId = seasonIdMap[session.seasonId] || cloudProfile.currentSeasonId;
+    mapped.seasonName = cloudProfile.seasons.find((season) => season.id === mapped.seasonId)?.name || session.seasonName;
+    teamKeys().forEach((teamKey) => {
+      mapped.teams[teamKey].players = (mapped.teams[teamKey].players || []).map(remapRef);
+    });
+    mapped.stats = (mapped.stats || []).map((stat) => {
+      const nextId = playerIdMap[stat.id] || playerIdMap[stat.playerId] || stat.id;
+      return { ...stat, id: nextId, playerId: nextId };
+    });
+    recalculateImportedSession(mapped, cloudProfile);
+    return mapped;
+  });
+
+  cloudProfile.sessions.push(...importedSessions);
+  await Promise.all(importedSessions.map((session) =>
+    supabaseClient.from("sessions").insert(toSessionRow(session))
+  ));
+
+  if (imported.draft && imported.draft.mode !== "setup" && !cloudProfile.draft?.currentMatch && !cloudProfile.draft?.finishedMatch) {
+    cloudProfile.draft = structuredClone(imported.draft);
+    cloudProfile.draft.seasonId = seasonIdMap[imported.draft.seasonId] || cloudProfile.currentSeasonId;
+    teamKeys().forEach((teamKey) => {
+      cloudProfile.draft.teams[teamKey].players = (cloudProfile.draft.teams[teamKey].players || []).map(remapRef);
+    });
+  }
+
+  localProfile.migratedToCloudUserId = currentUser.id;
+  localProfile.migratedAt = new Date().toISOString();
+  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+  alert("Historico antigo importado para a nuvem.");
+  profile = previousProfile;
+  return cloudProfile;
+}
+
+function recalculateImportedSession(session, targetProfile) {
+  const statsById = Object.fromEntries((session.stats || []).map((item) => [item.id, item]));
+  session.stats.forEach((item) => {
+    const player = targetProfile.players.find((entry) => entry.id === item.id || entry.id === item.playerId);
+    if (player) item.name = `${player.firstName} ${player.lastName}`.trim();
+  });
+  session.winsByTeam = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  session.matches.forEach((match) => {
+    if (!match.winner) return;
+    session.winsByTeam[match.winner] += 1;
+    (session.teams[match.winner].players || []).forEach((ref) => {
+      const id = ref;
+      if (!statsById[id]) {
+        const player = targetProfile.players.find((entry) => entry.id === id);
+        statsById[id] = {
+          id,
+          playerId: id,
+          name: player ? `${player.firstName} ${player.lastName}`.trim() : String(ref),
+          teamKey: match.winner,
+          goals: 0,
+          assists: 0,
+          wins: 0
+        };
+        session.stats.push(statsById[id]);
+      }
+      statsById[id].wins += 1;
+    });
+  });
+  const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  session.winnerTeam = {
+    key: winnerTeamKey,
+    label: `${TEAM_META[winnerTeamKey].name} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+  };
+  session.topScorer = topBy(session.stats, "goals", "Sem gols");
+  session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
+  session.topHot = topBy(session.stats, "wins", "Sem vitorias");
+  session.report = buildReport(session);
 }
 
 function newDraft() {
@@ -258,12 +556,38 @@ async function registerProfile(event) {
     return;
   }
 
-  const duplicate = store.profiles.some((item) =>
+  const duplicate = !isCloudMode && store.profiles.some((item) =>
     item.username === username || item.email === email || item.phone === phone
   );
   if (duplicate) {
     setAuthMessage("Ja existe perfil com esse usuario, email ou WhatsApp.", true);
     return;
+  }
+
+  if (isCloudMode) {
+    try {
+      const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+          data: { peladaName, username, phone }
+        }
+      });
+      if (error) throw error;
+      if (!data.session) {
+        setAuthMessage("Cadastro criado. Se o Supabase pedir confirmacao, confirme no email e depois entre.");
+        return;
+      }
+      currentUser = data.user;
+      profile = await createCloudProfile(data.user, { peladaName, username, email, phone });
+      profile = await migrateLocalProfileToCloudIfNeeded(profile);
+      isCloudMode = true;
+      enterProfile(profile);
+      return;
+    } catch (error) {
+      setAuthMessage(error.message || "Nao foi possivel criar o perfil.", true);
+      return;
+    }
   }
 
   const firstSeason = {
@@ -295,7 +619,37 @@ async function registerProfile(event) {
 async function loginProfile(event) {
   event.preventDefault();
   const form = new FormData(event.currentTarget);
-  const username = normalizeUsername(form.get("username"));
+  const identity = form.get("username").trim();
+  const username = normalizeUsername(identity);
+
+  if (isCloudMode) {
+    try {
+      const email = await getLoginEmail(identity);
+      const { data, error } = await supabaseClient.auth.signInWithPassword({
+        email,
+        password: form.get("password")
+      });
+      if (error) throw error;
+      currentUser = data.user;
+      let cloudProfile = await loadCloudProfile(data.user);
+      if (!cloudProfile) {
+        const meta = data.user.user_metadata || {};
+        cloudProfile = await createCloudProfile(data.user, {
+          peladaName: meta.peladaName || "Minha pelada",
+          username: meta.username || username,
+          email: data.user.email,
+          phone: meta.phone || ""
+        });
+      }
+      cloudProfile = await migrateLocalProfileToCloudIfNeeded(cloudProfile);
+      enterProfile(cloudProfile);
+      return;
+    } catch (error) {
+      setAuthMessage(error.message || "Usuario ou senha incorretos.", true);
+      return;
+    }
+  }
+
   const passwordHash = await hashPassword(form.get("password"));
   const found = store.profiles.find((item) => item.username === username && item.passwordHash === passwordHash);
 
@@ -312,6 +666,18 @@ async function loginProfile(event) {
 function recoverProfile(event) {
   event.preventDefault();
   const identity = new FormData(event.currentTarget).get("identity").trim().toLowerCase();
+
+  if (isCloudMode) {
+    getLoginEmail(identity)
+      .then((email) => supabaseClient.auth.resetPasswordForEmail(email))
+      .then(({ error }) => {
+        if (error) throw error;
+        setAuthMessage("Enviamos a recuperacao para o email cadastrado.");
+      })
+      .catch((error) => setAuthMessage(error.message || "Nao foi possivel recuperar.", true));
+    return;
+  }
+
   const digits = onlyDigits(identity);
   const found = store.profiles.find((item) =>
     item.username === normalizeUsername(identity) || item.email === identity || item.phone === digits
@@ -363,11 +729,15 @@ function enterProfile(nextProfile) {
   render();
 }
 
-function logout() {
+async function logout() {
   clearInterval(timerId);
+  if (isCloudMode && supabaseClient) {
+    await supabaseClient.auth.signOut();
+  }
   profile = null;
   draft = null;
-  store.activeProfileId = null;
+  currentUser = null;
+  if (!isCloudMode) store.activeProfileId = null;
   saveStore();
   els.appShell.classList.add("hidden");
   els.authShell.classList.remove("hidden");
@@ -508,6 +878,22 @@ async function savePlayerProfile(event) {
   if (existing) Object.assign(existing, player);
   else profile.players.push(player);
 
+  if (isCloudMode) {
+    const { error } = await supabaseClient.from("players").upsert({
+      id: player.id,
+      profile_id: currentUser.id,
+      first_name: player.firstName,
+      last_name: player.lastName,
+      member_type: player.memberType,
+      photo_path: player.photo || null
+    });
+    if (error) {
+      alert("Nao foi possivel salvar o jogador na nuvem.");
+      console.warn(error);
+      return;
+    }
+  }
+
   profile.sessions.forEach((session) => {
     session.stats.forEach((stat) => {
       if (stat.id === player.id || stat.playerId === player.id) {
@@ -545,6 +931,11 @@ function deletePlayerProfile(playerId) {
   }
   if (!confirm("Remover este jogador cadastrado?")) return;
   profile.players = profile.players.filter((player) => player.id !== playerId);
+  if (isCloudMode) {
+    supabaseClient.from("players").delete().eq("id", playerId).then(({ error }) => {
+      if (error) console.warn("Falha ao remover jogador na nuvem", error);
+    });
+  }
   saveStore();
   renderPlayers();
   render();
@@ -1066,6 +1457,11 @@ function deleteSession(sessionId) {
   if (!confirm("Apagar esta pelada do historico?")) return;
   profile.sessions = profile.sessions.filter((item) => item.id !== sessionId);
   if (editingSessionId === sessionId) editingSessionId = null;
+  if (isCloudMode) {
+    supabaseClient.from("sessions").delete().eq("id", sessionId).then(({ error }) => {
+      if (error) console.warn("Falha ao apagar na nuvem", error);
+    });
+  }
   saveStore();
   renderData();
 }
@@ -1090,6 +1486,11 @@ function saveSessionEdit(event) {
 
   recalculateSession(session);
   editingSessionId = null;
+  if (isCloudMode) {
+    supabaseClient.from("sessions").upsert(toSessionRow(session)).then(({ error }) => {
+      if (error) console.warn("Falha ao salvar edicao na nuvem", error);
+    });
+  }
   saveStore();
   renderData();
 }
@@ -1146,7 +1547,7 @@ function saveMatchSettings(event) {
   render();
 }
 
-function createSeason(event) {
+async function createSeason(event) {
   event.preventDefault();
   const input = event.currentTarget.elements.seasonName;
   const name = input.value.trim();
@@ -1157,6 +1558,19 @@ function createSeason(event) {
   profile.seasons.push(season);
   profile.currentSeasonId = season.id;
   draft.seasonId = season.id;
+  if (isCloudMode) {
+    const { error: seasonError } = await supabaseClient.from("seasons").insert({
+      id: season.id,
+      profile_id: currentUser.id,
+      name: season.name
+    });
+    if (seasonError) {
+      alert("Nao foi possivel criar a temporada na nuvem.");
+      console.warn(seasonError);
+      return;
+    }
+    await supabaseClient.from("pelada_profiles").update({ current_season_id: season.id }).eq("id", currentUser.id);
+  }
   input.value = "";
   saveStore();
   render();
@@ -1165,6 +1579,9 @@ function createSeason(event) {
 function switchSeason() {
   profile.currentSeasonId = els.seasonSelect.value;
   draft.seasonId = profile.currentSeasonId;
+  if (isCloudMode) {
+    supabaseClient.from("pelada_profiles").update({ current_season_id: profile.currentSeasonId }).eq("id", currentUser.id);
+  }
   saveStore();
   render();
 }
@@ -1325,6 +1742,32 @@ els.dataGrid.addEventListener("submit", (event) => {
   }
 });
 
-const active = store.profiles.find((item) => item.id === store.activeProfileId);
-if (active) enterProfile(active);
-else showAuthTab("login");
+async function initApp() {
+  supabaseClient = setupSupabaseClient();
+  isCloudMode = Boolean(supabaseClient);
+
+  if (isCloudMode) {
+    const { data } = await supabaseClient.auth.getSession();
+    if (data.session?.user) {
+      try {
+        currentUser = data.session.user;
+        const cloudProfile = await loadCloudProfile(currentUser);
+        if (cloudProfile) {
+          const migratedProfile = await migrateLocalProfileToCloudIfNeeded(cloudProfile);
+          enterProfile(migratedProfile);
+          return;
+        }
+      } catch (error) {
+        console.warn("Falha ao carregar perfil na nuvem", error);
+      }
+    }
+    showAuthTab("login");
+    return;
+  }
+
+  const active = store.profiles.find((item) => item.id === store.activeProfileId);
+  if (active) enterProfile(active);
+  else showAuthTab("login");
+}
+
+initApp();
