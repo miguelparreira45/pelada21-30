@@ -105,6 +105,7 @@ button {
 }
 
 .auth-tabs,
+.data-tabs,
 .main-nav,
 .next-actions,
 .section-head,
@@ -122,6 +123,7 @@ button {
 }
 
 .auth-tabs,
+.data-tabs,
 .main-nav {
   justify-content: flex-start;
   flex-wrap: wrap;
@@ -208,6 +210,22 @@ select {
   color: var(--ink);
 }
 
+.password-wrap {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+
+.password-toggle {
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #151915;
+  color: var(--green);
+  font-weight: 850;
+}
+
 .auth-message {
   min-height: 24px;
   margin: 14px 0 0;
@@ -266,6 +284,39 @@ p {
   display: grid;
   gap: 18px;
   animation: riseIn .45s ease both;
+}
+
+.setup-options {
+  display: grid;
+  grid-template-columns: 1.05fr .95fr;
+  gap: 14px;
+}
+
+.option-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)), var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.season-controls,
+.settings-form,
+.inline-form {
+  display: grid;
+  gap: 10px;
+}
+
+.inline-form,
+.settings-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.settings-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
 }
 
 .teams-grid {
@@ -506,6 +557,7 @@ p {
 @media (max-width: 920px) {
   .auth-shell,
   .teams-grid,
+  .setup-options,
   .scoreboard,
   .match-tools,
   .goal-form,
@@ -526,8 +578,12 @@ p {
   }
 
   .main-nav,
-  .auth-tabs {
+  .auth-tabs,
+  .data-tabs,
+  .inline-form,
+  .settings-form {
     width: 100%;
+    grid-template-columns: 1fr;
   }
 
   .main-nav button,

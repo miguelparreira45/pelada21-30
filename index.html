@@ -24,7 +24,12 @@
 
         <form class="auth-form" id="loginForm">
           <label>Usuario<input name="username" autocomplete="username" required></label>
-          <label>Senha<input name="password" type="password" autocomplete="current-password" required></label>
+          <label>Senha
+            <span class="password-wrap">
+              <input name="password" type="password" autocomplete="current-password" required>
+              <button class="password-toggle" type="button" data-toggle-password>Olhar</button>
+            </span>
+          </label>
           <button class="primary-action" type="submit">Entrar no sistema</button>
         </form>
 
@@ -33,7 +38,12 @@
           <label>Usuario<input name="username" placeholder="minhapelada" required></label>
           <label>Email<input name="email" type="email" required></label>
           <label>WhatsApp<input name="phone" inputmode="tel" placeholder="21999999999" required></label>
-          <label>Senha<input name="password" type="password" autocomplete="new-password" required></label>
+          <label>Senha
+            <span class="password-wrap">
+              <input name="password" type="password" autocomplete="new-password" required>
+              <button class="password-toggle" type="button" data-toggle-password>Olhar</button>
+            </span>
+          </label>
           <button class="primary-action" type="submit">Criar perfil</button>
         </form>
 
@@ -44,7 +54,12 @@
 
         <form class="auth-form hidden" id="resetForm">
           <label>Codigo de 4 digitos<input name="code" inputmode="numeric" maxlength="4" required></label>
-          <label>Nova senha<input name="password" type="password" autocomplete="new-password" required></label>
+          <label>Nova senha
+            <span class="password-wrap">
+              <input name="password" type="password" autocomplete="new-password" required>
+              <button class="password-toggle" type="button" data-toggle-password>Olhar</button>
+            </span>
+          </label>
           <button class="primary-action" type="submit">Trocar senha</button>
         </form>
 
@@ -70,6 +85,34 @@
 
       <section class="game-tab" id="gameTab">
         <section class="setup-view" id="setupView">
+          <section class="setup-options">
+            <div class="option-card">
+              <div>
+                <p class="eyebrow">Temporada</p>
+                <h2>Escolha onde esta pelada entra</h2>
+              </div>
+              <div class="season-controls">
+                <label>Temporada atual<select id="seasonSelect"></select></label>
+                <form class="inline-form" id="seasonForm">
+                  <input name="seasonName" placeholder="Ex: Temporada 2026.1" required>
+                  <button class="secondary-action" type="submit">Criar temporada</button>
+                </form>
+              </div>
+            </div>
+
+            <div class="option-card">
+              <div>
+                <p class="eyebrow">Regras da partida</p>
+                <h2>Defina tempo e gols</h2>
+              </div>
+              <form class="settings-form" id="matchSettingsForm">
+                <label>Duração<input id="durationInput" name="durationMinutes" type="number" min="1" max="60" step="1"></label>
+                <label>Gols para vencer<input id="goalLimitInput" name="goalLimit" type="number" min="1" max="20" step="1"></label>
+                <button class="secondary-action" type="submit">Salvar regras</button>
+              </form>
+            </div>
+          </section>
+
           <div class="section-head">
             <div>
               <p class="eyebrow">Times da rodada</p>
@@ -86,7 +129,7 @@
             <div class="timer-panel">
               <p class="match-label" id="matchLabel">Partida 1</p>
               <div class="timer" id="timer">07:00</div>
-              <p class="rule">2 gols ou 7 minutos</p>
+              <p class="rule" id="matchRule">2 gols ou 7 minutos</p>
               <button class="primary-action timer-action" id="startCountdown">Iniciar contagem</button>
               <button class="secondary-action timer-action hidden" id="endTimedMatch">Encerrar partida</button>
             </div>
@@ -138,6 +181,11 @@
             <h2>Historico da pelada</h2>
           </div>
           <button class="secondary-action" id="newSession">Nova pelada</button>
+        </div>
+        <div class="data-tabs">
+          <button class="tab-button active" data-data-tab="today">Peladas de hoje</button>
+          <button class="tab-button" data-data-tab="season">Peladas temporada</button>
+          <button class="tab-button" data-data-tab="general">Pelada geral</button>
         </div>
         <div class="data-grid" id="dataGrid"></div>
       </section>

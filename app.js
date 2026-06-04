@@ -4,15 +4,15 @@ const TEAM_META = {
   green: { name: "Verde", color: "#1dc679" }
 };
 
-const MATCH_SECONDS = 7 * 60;
 const STORE_KEY = "peladafast-store-v2";
-const PHONE_REPORT = "5521974381772";
+const DEFAULT_SETTINGS = { durationMinutes: 7, goalLimit: 2 };
 
 let store = loadStore();
 let profile = null;
 let draft = null;
 let timerId = null;
 let pendingRecovery = null;
+let activeDataTab = "today";
 
 const els = {
   authShell: document.querySelector("#authShell"),
@@ -32,11 +32,17 @@ const els = {
   finalView: document.querySelector("#finalView"),
   teamsGrid: document.querySelector("#teamsGrid"),
   drawMatch: document.querySelector("#drawMatch"),
+  seasonSelect: document.querySelector("#seasonSelect"),
+  seasonForm: document.querySelector("#seasonForm"),
+  matchSettingsForm: document.querySelector("#matchSettingsForm"),
+  durationInput: document.querySelector("#durationInput"),
+  goalLimitInput: document.querySelector("#goalLimitInput"),
   leftPanel: document.querySelector("#leftPanel"),
   rightPanel: document.querySelector("#rightPanel"),
   timer: document.querySelector("#timer"),
   startCountdown: document.querySelector("#startCountdown"),
   endTimedMatch: document.querySelector("#endTimedMatch"),
+  matchRule: document.querySelector("#matchRule"),
   matchLabel: document.querySelector("#matchLabel"),
   benchStrip: document.querySelector("#benchStrip"),
   goalForm: document.querySelector("#goalForm"),
@@ -57,7 +63,10 @@ const els = {
 
 function loadStore() {
   try {
-    return JSON.parse(localStorage.getItem(STORE_KEY)) || { profiles: [], activeProfileId: null };
+    const nextStore = JSON.parse(localStorage.getItem(STORE_KEY)) || { profiles: [], activeProfileId: null };
+    nextStore.profiles ||= [];
+    nextStore.profiles.forEach(ensureProfileDefaults);
+    return nextStore;
   } catch {
     return { profiles: [], activeProfileId: null };
   }
@@ -83,9 +92,38 @@ function newDraft() {
     currentMatch: null,
     finishedMatch: null,
     finalSummary: null,
+    settings: { ...DEFAULT_SETTINGS },
+    seasonId: null,
     mode: "setup",
     startedAt: new Date().toISOString()
   };
+}
+
+function ensureProfileDefaults(item) {
+  item.sessions ||= [];
+  item.seasons ||= [];
+  if (!item.seasons.length) {
+    item.seasons.push({
+      id: crypto.randomUUID(),
+      name: "Temporada principal",
+      createdAt: new Date().toISOString()
+    });
+  }
+  item.currentSeasonId ||= item.seasons[0].id;
+  item.draft ||= newDraft();
+  item.draft.settings ||= { ...DEFAULT_SETTINGS };
+  item.draft.seasonId ||= item.currentSeasonId;
+  item.draft.completedMatches ||= [];
+  item.draft.playerStats ||= {};
+  return item;
+}
+
+function currentSeason() {
+  return profile?.seasons?.find((season) => season.id === profile.currentSeasonId) || profile?.seasons?.[0];
+}
+
+function matchDurationSeconds(match = draft.currentMatch) {
+  return (match?.durationMinutes || draft.settings.durationMinutes || DEFAULT_SETTINGS.durationMinutes) * 60;
 }
 
 function normalizeUsername(value) {
@@ -193,6 +231,11 @@ async function registerProfile(event) {
     return;
   }
 
+  const firstSeason = {
+    id: crypto.randomUUID(),
+    name: "Temporada principal",
+    createdAt: new Date().toISOString()
+  };
   const newProfile = {
     id: crypto.randomUUID(),
     peladaName,
@@ -201,9 +244,12 @@ async function registerProfile(event) {
     phone,
     passwordHash: await hashPassword(password),
     createdAt: new Date().toISOString(),
+    seasons: [firstSeason],
+    currentSeasonId: firstSeason.id,
     sessions: [],
     draft: newDraft()
   };
+  newProfile.draft.seasonId = firstSeason.id;
 
   store.profiles.push(newProfile);
   store.activeProfileId = newProfile.id;
@@ -268,10 +314,12 @@ async function resetPassword(event) {
 }
 
 function enterProfile(nextProfile) {
-  profile = nextProfile;
+  profile = ensureProfileDefaults(nextProfile);
   draft = profile.draft || newDraft();
   draft.completedMatches ||= [];
   draft.playerStats ||= {};
+  draft.settings ||= { ...DEFAULT_SETTINGS };
+  draft.seasonId ||= profile.currentSeasonId;
   els.authShell.classList.add("hidden");
   els.appShell.classList.remove("hidden");
   els.profileUser.textContent = `@${profile.username}`;
@@ -309,6 +357,9 @@ function render() {
 }
 
 function renderSetup() {
+  renderSeasonControls();
+  els.durationInput.value = draft.settings.durationMinutes;
+  els.goalLimitInput.value = draft.settings.goalLimit;
   els.teamsGrid.innerHTML = teamKeys().map((key) => {
     const meta = TEAM_META[key];
     const players = draft.teams[key].players;
@@ -333,7 +384,14 @@ function renderSetup() {
     `;
   }).join("");
 
-  els.drawMatch.disabled = !teamKeys().every((key) => draft.teams[key].players.length > 0);
+  els.drawMatch.disabled = !profile.currentSeasonId || !teamKeys().every((key) => draft.teams[key].players.length > 0);
+}
+
+function renderSeasonControls() {
+  els.seasonSelect.innerHTML = profile.seasons
+    .map((season) => `<option value="${season.id}">${escapeHtml(season.name)}</option>`)
+    .join("");
+  els.seasonSelect.value = profile.currentSeasonId;
 }
 
 function renderMatch() {
@@ -345,6 +403,7 @@ function renderMatch() {
   els.leftPanel.innerHTML = renderTeamPanel(left);
   els.rightPanel.innerHTML = renderTeamPanel(right);
   els.timer.textContent = formatClock(match.remaining);
+  els.matchRule.textContent = `${match.goalLimit} gol${match.goalLimit === 1 ? "" : "s"} ou ${match.durationMinutes} minuto${match.durationMinutes === 1 ? "" : "s"}`;
   els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
   els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
   renderBench();
@@ -474,18 +533,23 @@ function startTimer() {
 }
 
 function startFirstMatch() {
+  draft.seasonId = profile.currentSeasonId;
   const order = shuffle(teamKeys());
   startMatch([order[0], order[1]], order[2]);
 }
 
 function startMatch(playing, bench) {
   draft.matchNumber += 1;
+  const durationMinutes = Number(draft.settings.durationMinutes) || DEFAULT_SETTINGS.durationMinutes;
+  const goalLimit = Number(draft.settings.goalLimit) || DEFAULT_SETTINGS.goalLimit;
   draft.currentMatch = {
     playing,
     bench,
     score: { [playing[0]]: 0, [playing[1]]: 0 },
     goals: [],
-    remaining: MATCH_SECONDS,
+    remaining: durationMinutes * 60,
+    durationMinutes,
+    goalLimit,
     isRunning: false,
     isTimeUp: false,
     startedAt: new Date().toISOString()
@@ -520,11 +584,11 @@ function registerGoal(event) {
     teamKey,
     scorer,
     assistant: assistant && assistant !== scorer ? assistant : "",
-    at: MATCH_SECONDS - draft.currentMatch.remaining
+    at: matchDurationSeconds(draft.currentMatch) - draft.currentMatch.remaining
   });
   celebrateGoal(teamKey);
 
-  if (draft.currentMatch.score[teamKey] >= 2) {
+  if (draft.currentMatch.score[teamKey] >= draft.currentMatch.goalLimit) {
     finishCurrentMatch("goals", teamKey);
   } else {
     render();
@@ -579,7 +643,6 @@ function finishSession() {
   draft.finalSummary = summary;
   draft.mode = "final";
   saveStore();
-  window.open(`https://wa.me/${PHONE_REPORT}?text=${encodeURIComponent(summary.report)}`, "_blank", "noopener,noreferrer");
   render();
 }
 
@@ -594,9 +657,13 @@ function buildSessionSummary() {
   const topScorer = topBy(stats, "goals", "Sem gols");
   const topAssistant = topBy(stats, "assists", "Sem assistencias");
   const topHot = topBy(stats, "wins", "Sem vitorias");
+  const season = currentSeason();
   const summary = {
     id: crypto.randomUUID(),
     date: new Date().toISOString(),
+    seasonId: season?.id || null,
+    seasonName: season?.name || "Sem temporada",
+    settings: { ...draft.settings },
     teams: structuredClone(draft.teams),
     matches: structuredClone(draft.completedMatches),
     stats: structuredClone(stats),
@@ -614,9 +681,16 @@ function buildSessionSummary() {
 }
 
 function topBy(stats, field, fallback) {
-  const best = [...stats].sort((a, b) => b[field] - a[field])[0];
-  if (!best || !best[field]) return { label: fallback, value: 0 };
-  return { label: `${best.name} (${best[field]})`, value: best[field], player: best.name, teamKey: best.teamKey };
+  const max = Math.max(0, ...stats.map((item) => Number(item[field]) || 0));
+  if (!max) return { label: fallback, value: 0, players: [] };
+  const tied = stats
+    .filter((item) => item[field] === max)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return {
+    label: tied.map((item) => `${item.name} (${max})`).join(", "),
+    value: max,
+    players: tied.map((item) => ({ name: item.name, teamKey: item.teamKey }))
+  };
 }
 
 function buildReport(summary) {
@@ -644,15 +718,25 @@ function buildReport(summary) {
 }
 
 function renderData() {
-  const sessions = profile.sessions || [];
-  const overall = buildOverall(sessions);
+  document.querySelectorAll("[data-data-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.dataTab === activeDataTab);
+  });
+
+  const sessions = filteredSessions(activeDataTab);
+  const ranking = buildOverall(sessions);
+  const title = activeDataTab === "today"
+    ? "Peladas de hoje"
+    : activeDataTab === "season"
+      ? `Temporada: ${currentSeason()?.name || "Sem temporada"}`
+      : "Pelada geral";
+
   els.dataGrid.innerHTML = `
     <section class="data-card">
-      <h3>Ranking geral</h3>
+      <h3>${escapeHtml(title)}</h3>
       <div class="leader-grid">
-        <div class="leader-box"><span>Artilheiro geral</span><strong>${escapeHtml(overall.topScorer.label)}</strong></div>
-        <div class="leader-box"><span>Assistente geral</span><strong>${escapeHtml(overall.topAssistant.label)}</strong></div>
-        <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(overall.topHot.label)}</strong></div>
+        <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
+        <div class="leader-box"><span>Assistencias</span><strong>${escapeHtml(ranking.topAssistant.label)}</strong></div>
+        <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(ranking.topHot.label)}</strong></div>
       </div>
     </section>
     <section class="data-card">
@@ -662,6 +746,16 @@ function renderData() {
       </div>
     </section>
   `;
+}
+
+function filteredSessions(tab) {
+  const sessions = profile.sessions || [];
+  if (tab === "general") return sessions;
+  if (tab === "season") {
+    return sessions.filter((session) => session.seasonId === profile.currentSeasonId);
+  }
+  const today = new Date().toLocaleDateString("pt-BR");
+  return sessions.filter((session) => new Date(session.date).toLocaleDateString("pt-BR") === today);
 }
 
 function renderSessionCard(session) {
@@ -675,6 +769,7 @@ function renderSessionCard(session) {
     <article class="leader-box">
       <p class="eyebrow">${date}</p>
       <h3>${escapeHtml(session.winnerTeam.label)}</h3>
+      <div class="summary-row"><strong>Temporada</strong><span>${escapeHtml(session.seasonName || "Sem temporada")}</span></div>
       <div class="summary-row"><strong>Artilheiro</strong><span>${escapeHtml(session.topScorer.label)}</span></div>
       <div class="summary-row"><strong>Assistente</strong><span>${escapeHtml(session.topAssistant.label)}</span></div>
       ${matches}
@@ -693,25 +788,63 @@ function buildOverall(sessions) {
   });
   const stats = Object.values(total);
   return {
-    topScorer: topOverall(stats, "goals", "Sem gols"),
-    topAssistant: topOverall(stats, "assists", "Sem assistencias"),
-    topHot: topOverall(stats, "wins", "Sem vitorias")
+    topScorer: topBy(stats, "goals", "Sem gols"),
+    topAssistant: topBy(stats, "assists", "Sem assistencias"),
+    topHot: topBy(stats, "wins", "Sem vitorias")
   };
-}
-
-function topOverall(stats, field, fallback) {
-  const best = [...stats].sort((a, b) => b[field] - a[field])[0];
-  if (!best || !best[field]) return { label: fallback };
-  return { label: `${best.name} (${best[field]})` };
 }
 
 function resetDraft() {
   clearInterval(timerId);
+  const settings = draft?.settings || { ...DEFAULT_SETTINGS };
+  const seasonId = profile.currentSeasonId;
   draft = newDraft();
+  draft.settings = { ...settings };
+  draft.seasonId = seasonId;
   profile.draft = draft;
   saveStore();
   showAppTab("game");
   render();
+}
+
+function saveMatchSettings(event) {
+  event.preventDefault();
+  const durationMinutes = Math.max(1, Math.min(60, Number(els.durationInput.value) || DEFAULT_SETTINGS.durationMinutes));
+  const goalLimit = Math.max(1, Math.min(20, Number(els.goalLimitInput.value) || DEFAULT_SETTINGS.goalLimit));
+  draft.settings = { durationMinutes, goalLimit };
+  render();
+}
+
+function createSeason(event) {
+  event.preventDefault();
+  const input = event.currentTarget.elements.seasonName;
+  const name = input.value.trim();
+  if (!name) return;
+  const exists = profile.seasons.some((season) => season.name.toLowerCase() === name.toLowerCase());
+  if (exists) return;
+  const season = { id: crypto.randomUUID(), name, createdAt: new Date().toISOString() };
+  profile.seasons.push(season);
+  profile.currentSeasonId = season.id;
+  draft.seasonId = season.id;
+  input.value = "";
+  saveStore();
+  render();
+}
+
+function switchSeason() {
+  profile.currentSeasonId = els.seasonSelect.value;
+  draft.seasonId = profile.currentSeasonId;
+  saveStore();
+  render();
+}
+
+function togglePassword(event) {
+  const wrapper = event.target.closest(".password-wrap");
+  const input = wrapper?.querySelector("input");
+  if (!input) return;
+  const visible = input.type === "text";
+  input.type = visible ? "password" : "text";
+  event.target.textContent = visible ? "Olhar" : "Ocultar";
 }
 
 function celebrateGoal(teamKey) {
@@ -769,6 +902,21 @@ document.querySelectorAll("[data-auth-tab]").forEach((button) => {
 document.querySelectorAll("[data-app-tab]").forEach((button) => {
   button.addEventListener("click", () => showAppTab(button.dataset.appTab));
 });
+
+document.querySelectorAll("[data-data-tab]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeDataTab = button.dataset.dataTab;
+    renderData();
+  });
+});
+
+document.querySelectorAll("[data-toggle-password]").forEach((button) => {
+  button.addEventListener("click", togglePassword);
+});
+
+els.seasonSelect.addEventListener("change", switchSeason);
+els.seasonForm.addEventListener("submit", createSeason);
+els.matchSettingsForm.addEventListener("submit", saveMatchSettings);
 
 els.teamsGrid.addEventListener("submit", (event) => {
   const form = event.target.closest("[data-team-form]");
