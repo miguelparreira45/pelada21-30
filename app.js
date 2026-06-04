@@ -13,6 +13,7 @@ let draft = null;
 let timerId = null;
 let pendingRecovery = null;
 let activeDataTab = "today";
+let editingSessionId = null;
 
 const els = {
   authShell: document.querySelector("#authShell"),
@@ -731,6 +732,7 @@ function renderData() {
       : "Pelada geral";
 
   els.dataGrid.innerHTML = `
+    ${editingSessionId ? renderSessionEditor(editingSessionId) : ""}
     <section class="data-card">
       <h3>${escapeHtml(title)}</h3>
       <div class="leader-grid">
@@ -773,7 +775,70 @@ function renderSessionCard(session) {
       <div class="summary-row"><strong>Artilheiro</strong><span>${escapeHtml(session.topScorer.label)}</span></div>
       <div class="summary-row"><strong>Assistente</strong><span>${escapeHtml(session.topAssistant.label)}</span></div>
       ${matches}
+      <div class="card-actions">
+        <button class="secondary-action" data-edit-session="${session.id}">Editar</button>
+        <button class="danger-action" data-delete-session="${session.id}">Apagar</button>
+      </div>
     </article>
+  `;
+}
+
+function renderSessionEditor(sessionId) {
+  const session = profile.sessions.find((item) => item.id === sessionId);
+  if (!session) return "";
+
+  const matches = session.matches.map((match, index) => {
+    const scores = match.playing.map((teamKey) => `
+      <label>${TEAM_META[teamKey].name}
+        <input name="match_${index}_score_${teamKey}" type="number" min="0" max="99" value="${match.score[teamKey] || 0}">
+      </label>
+    `).join("");
+    return `
+      <div class="editor-block">
+        <h4>Partida ${index + 1}</h4>
+        <div class="editor-grid">
+          ${scores}
+          <label>Vencedor
+            <select name="match_${index}_winner">
+              ${match.playing.map((teamKey) => `<option value="${teamKey}" ${match.winner === teamKey ? "selected" : ""}>${TEAM_META[teamKey].name}</option>`).join("")}
+            </select>
+          </label>
+        </div>
+      </div>
+    `;
+  }).join("");
+
+  const stats = session.stats
+    .slice()
+    .sort((a, b) => TEAM_META[a.teamKey].name.localeCompare(TEAM_META[b.teamKey].name) || a.name.localeCompare(b.name))
+    .map((item) => `
+      <div class="editor-player">
+        <strong>${escapeHtml(item.name)} <small>${TEAM_META[item.teamKey].name}</small></strong>
+        <label>Gols<input name="stat_${item.id}_goals" type="number" min="0" max="999" value="${item.goals || 0}"></label>
+        <label>Assist.<input name="stat_${item.id}_assists" type="number" min="0" max="999" value="${item.assists || 0}"></label>
+      </div>
+    `).join("");
+
+  return `
+    <section class="data-card session-editor">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Correção de histórico</p>
+          <h3>Editar pelada</h3>
+        </div>
+        <button class="secondary-action" data-cancel-edit type="button">Fechar</button>
+      </div>
+      <form id="sessionEditorForm" data-editing-session="${session.id}">
+        <h4>Partidas</h4>
+        ${matches}
+        <h4>Jogadores</h4>
+        <div class="editor-players">${stats}</div>
+        <div class="card-actions">
+          <button class="primary-action" type="submit">Salvar correções</button>
+          <button class="secondary-action" data-cancel-edit type="button">Cancelar</button>
+        </div>
+      </form>
+    </section>
   `;
 }
 
@@ -792,6 +857,71 @@ function buildOverall(sessions) {
     topAssistant: topBy(stats, "assists", "Sem assistencias"),
     topHot: topBy(stats, "wins", "Sem vitorias")
   };
+}
+
+function deleteSession(sessionId) {
+  const session = profile.sessions.find((item) => item.id === sessionId);
+  if (!session) return;
+  if (!confirm("Apagar esta pelada do historico?")) return;
+  profile.sessions = profile.sessions.filter((item) => item.id !== sessionId);
+  if (editingSessionId === sessionId) editingSessionId = null;
+  saveStore();
+  renderData();
+}
+
+function saveSessionEdit(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const session = profile.sessions.find((item) => item.id === form.dataset.editingSession);
+  if (!session) return;
+
+  session.matches.forEach((match, index) => {
+    match.playing.forEach((teamKey) => {
+      match.score[teamKey] = Math.max(0, Number(form.elements[`match_${index}_score_${teamKey}`].value) || 0);
+    });
+    match.winner = form.elements[`match_${index}_winner`].value;
+  });
+
+  session.stats.forEach((item) => {
+    item.goals = Math.max(0, Number(form.elements[`stat_${item.id}_goals`].value) || 0);
+    item.assists = Math.max(0, Number(form.elements[`stat_${item.id}_assists`].value) || 0);
+  });
+
+  recalculateSession(session);
+  editingSessionId = null;
+  saveStore();
+  renderData();
+}
+
+function recalculateSession(session) {
+  const statsById = Object.fromEntries(session.stats.map((item) => [item.id, item]));
+  session.stats.forEach((item) => {
+    item.wins = 0;
+  });
+
+  session.winsByTeam = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  session.matches.forEach((match) => {
+    if (!match.winner) return;
+    session.winsByTeam[match.winner] += 1;
+    session.teams[match.winner].players.forEach((name) => {
+      const id = playerId(match.winner, name);
+      if (!statsById[id]) {
+        statsById[id] = { id, name, teamKey: match.winner, goals: 0, assists: 0, wins: 0 };
+        session.stats.push(statsById[id]);
+      }
+      statsById[id].wins += 1;
+    });
+  });
+
+  const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  session.winnerTeam = {
+    key: winnerTeamKey,
+    label: `${TEAM_META[winnerTeamKey].name} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+  };
+  session.topScorer = topBy(session.stats, "goals", "Sem gols");
+  session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
+  session.topHot = topBy(session.stats, "wins", "Sem vitorias");
+  session.report = buildReport(session);
 }
 
 function resetDraft() {
@@ -954,6 +1084,31 @@ els.winnerChoice.addEventListener("click", (event) => {
   if (button) chooseWinner(button.dataset.winner);
 });
 els.newSession.addEventListener("click", resetDraft);
+els.dataGrid.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-edit-session]");
+  if (editButton) {
+    editingSessionId = editButton.dataset.editSession;
+    renderData();
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-session]");
+  if (deleteButton) {
+    deleteSession(deleteButton.dataset.deleteSession);
+    return;
+  }
+
+  if (event.target.closest("[data-cancel-edit]")) {
+    editingSessionId = null;
+    renderData();
+  }
+});
+
+els.dataGrid.addEventListener("submit", (event) => {
+  if (event.target.matches("#sessionEditorForm")) {
+    saveSessionEdit(event);
+  }
+});
 
 const active = store.profiles.find((item) => item.id === store.activeProfileId);
 if (active) enterProfile(active);

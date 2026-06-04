@@ -132,6 +132,7 @@ button {
 .tab-button,
 .primary-action,
 .secondary-action,
+.danger-action,
 .icon-button {
   min-height: 44px;
   border: 0;
@@ -176,6 +177,14 @@ button {
   color: var(--ink);
   background: #111511;
   border: 1px solid var(--line);
+}
+
+.danger-action {
+  min-height: 44px;
+  padding: 0 16px;
+  color: #ffd7d7;
+  background: #271112;
+  border: 1px solid #633034;
 }
 
 .icon-button {
@@ -543,6 +552,55 @@ p {
   font-size: 22px;
 }
 
+.card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+}
+
+.session-editor {
+  grid-column: 1 / -1;
+  border-color: rgba(155, 227, 29, .55);
+}
+
+.session-editor form {
+  display: grid;
+  gap: 14px;
+}
+
+.editor-block {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.editor-grid,
+.editor-players {
+  display: grid;
+  gap: 10px;
+}
+
+.editor-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.editor-player {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 110px 110px;
+  gap: 10px;
+  align-items: end;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.editor-player:last-child {
+  border-bottom: 0;
+}
+
 @keyframes riseIn {
   from {
     opacity: 0;
@@ -563,6 +621,11 @@ p {
   .goal-form,
   .data-grid,
   .leader-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .editor-grid,
+  .editor-player {
     grid-template-columns: 1fr;
   }
 
