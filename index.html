@@ -3,87 +3,143 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Placar da Pelada</title>
+    <title>PeladaFast</title>
     <link rel="stylesheet" href="app.css">
   </head>
   <body>
-    <main class="shell">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">Pelada</p>
-          <h1>Placar da Pelada</h1>
+    <canvas id="confettiCanvas" aria-hidden="true"></canvas>
+
+    <main class="auth-shell" id="authShell">
+      <section class="brand-stage">
+        <img class="brand-logo" src="assets/peladafast-logo.png" alt="PeladaFast">
+        <h1>Dados, placar e ranking da sua pelada.</h1>
+      </section>
+
+      <section class="auth-panel">
+        <div class="auth-tabs">
+          <button class="tab-button active" data-auth-tab="login">Entrar</button>
+          <button class="tab-button" data-auth-tab="register">Criar perfil</button>
+          <button class="tab-button" data-auth-tab="recover">Recuperar</button>
         </div>
-        <button class="icon-button danger-ghost" id="resetApp" title="Zerar pelada" aria-label="Zerar pelada">↺</button>
+
+        <form class="auth-form" id="loginForm">
+          <label>Usuario<input name="username" autocomplete="username" required></label>
+          <label>Senha<input name="password" type="password" autocomplete="current-password" required></label>
+          <button class="primary-action" type="submit">Entrar no sistema</button>
+        </form>
+
+        <form class="auth-form hidden" id="registerForm">
+          <label>Nome da pelada<input name="peladaName" required></label>
+          <label>Usuario<input name="username" placeholder="minhapelada" required></label>
+          <label>Email<input name="email" type="email" required></label>
+          <label>WhatsApp<input name="phone" inputmode="tel" placeholder="21999999999" required></label>
+          <label>Senha<input name="password" type="password" autocomplete="new-password" required></label>
+          <button class="primary-action" type="submit">Criar perfil</button>
+        </form>
+
+        <form class="auth-form hidden" id="recoverForm">
+          <label>Usuario, email ou WhatsApp<input name="identity" required></label>
+          <button class="primary-action" type="submit">Enviar codigo</button>
+        </form>
+
+        <form class="auth-form hidden" id="resetForm">
+          <label>Codigo de 4 digitos<input name="code" inputmode="numeric" maxlength="4" required></label>
+          <label>Nova senha<input name="password" type="password" autocomplete="new-password" required></label>
+          <button class="primary-action" type="submit">Trocar senha</button>
+        </form>
+
+        <p class="auth-message" id="authMessage"></p>
+      </section>
+    </main>
+
+    <main class="app-shell hidden" id="appShell">
+      <header class="app-header">
+        <div class="app-brand">
+          <img src="assets/peladafast-logo.png" alt="PeladaFast">
+          <div>
+            <p class="eyebrow" id="profileUser">@pelada</p>
+            <h1 id="profileName">PeladaFast</h1>
+          </div>
+        </div>
+        <nav class="main-nav">
+          <button class="tab-button active" data-app-tab="game">Jogo</button>
+          <button class="tab-button" data-app-tab="data">Dados</button>
+          <button class="secondary-action" id="logoutButton">Sair</button>
+        </nav>
       </header>
 
-      <section class="setup-view" id="setupView">
+      <section class="game-tab" id="gameTab">
+        <section class="setup-view" id="setupView">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Times da rodada</p>
+              <h2>Monte azul, vermelho e verde</h2>
+            </div>
+            <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
+          </div>
+          <div class="teams-grid" id="teamsGrid"></div>
+        </section>
+
+        <section class="match-view hidden" id="matchView">
+          <div class="scoreboard">
+            <article class="team-panel" id="leftPanel"></article>
+            <div class="timer-panel">
+              <p class="match-label" id="matchLabel">Partida 1</p>
+              <div class="timer" id="timer">07:00</div>
+              <p class="rule">2 gols ou 7 minutos</p>
+              <button class="primary-action timer-action" id="startCountdown">Iniciar contagem</button>
+              <button class="secondary-action timer-action hidden" id="endTimedMatch">Encerrar partida</button>
+            </div>
+            <article class="team-panel" id="rightPanel"></article>
+          </div>
+
+          <div class="bench-strip" id="benchStrip"></div>
+
+          <div class="match-tools">
+            <section class="tool-panel">
+              <div class="panel-title">
+                <h2>Registrar lance</h2>
+                <p>Gol e assistencia entram nos dados da pelada.</p>
+              </div>
+              <form id="goalForm" class="goal-form">
+                <label>Time do gol<select id="goalTeam"></select></label>
+                <label>Gol de<select id="goalPlayer"></select></label>
+                <label>Assistencia<select id="assistPlayer"></select></label>
+                <button class="primary-action" type="submit">Marcar gol</button>
+              </form>
+            </section>
+
+            <section class="tool-panel">
+              <div class="panel-title">
+                <h2>Resumo ao vivo</h2>
+                <p id="runningSummary">Nenhum gol marcado ainda.</p>
+              </div>
+              <div class="stats-list" id="statsList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="ended-view hidden" id="endedView">
+          <div class="result-band" id="resultBand"></div>
+          <div class="winner-choice hidden" id="winnerChoice"></div>
+          <div class="next-actions">
+            <button class="primary-action big" id="nextMatch">Iniciar nova partida</button>
+            <button class="secondary-action" id="finishSession">Finalizar pelada</button>
+          </div>
+        </section>
+
+        <section class="final-view hidden" id="finalView"></section>
+      </section>
+
+      <section class="data-tab hidden" id="dataTab">
         <div class="section-head">
           <div>
-            <h2>Times</h2>
-            <p>Monte azul, vermelho e verde antes do sorteio.</p>
+            <p class="eyebrow">Dados e relatorios</p>
+            <h2>Historico da pelada</h2>
           </div>
-          <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
+          <button class="secondary-action" id="newSession">Nova pelada</button>
         </div>
-
-        <div class="teams-grid" id="teamsGrid"></div>
-      </section>
-
-      <section class="match-view hidden" id="matchView">
-        <div class="scoreboard">
-          <article class="team-panel" id="leftPanel"></article>
-          <div class="timer-panel">
-            <p class="match-label" id="matchLabel">Partida 1</p>
-            <div class="timer" id="timer">07:00</div>
-            <p class="rule">2 gols ou 7 minutos</p>
-            <button class="primary-action timer-action" id="startCountdown">Iniciar contagem</button>
-            <button class="secondary-action timer-action hidden" id="endTimedMatch">Encerrar partida</button>
-          </div>
-          <article class="team-panel" id="rightPanel"></article>
-        </div>
-
-        <div class="bench-strip" id="benchStrip"></div>
-
-        <div class="match-tools">
-          <section class="tool-panel">
-            <div class="panel-title">
-              <h2>Registrar lance</h2>
-              <p>Gol e assistencia entram no relatorio final.</p>
-            </div>
-
-            <form id="goalForm" class="goal-form">
-              <label>
-                Time do gol
-                <select id="goalTeam"></select>
-              </label>
-              <label>
-                Gol de
-                <select id="goalPlayer"></select>
-              </label>
-              <label>
-                Assistencia
-                <select id="assistPlayer"></select>
-              </label>
-              <button class="primary-action" type="submit">Marcar gol</button>
-            </form>
-          </section>
-
-          <section class="tool-panel">
-            <div class="panel-title">
-              <h2>Resumo da pelada</h2>
-              <p id="runningSummary">Nenhum gol marcado ainda.</p>
-            </div>
-            <div class="stats-list" id="statsList"></div>
-          </section>
-        </div>
-      </section>
-
-      <section class="ended-view hidden" id="endedView">
-        <div class="result-band" id="resultBand"></div>
-        <div class="winner-choice hidden" id="winnerChoice"></div>
-        <div class="next-actions">
-          <button class="primary-action big" id="nextMatch">Iniciar nova partida</button>
-          <button class="secondary-action" id="finishSession">Finalizar pelada</button>
-        </div>
+        <div class="data-grid" id="dataGrid"></div>
       </section>
     </main>
 
