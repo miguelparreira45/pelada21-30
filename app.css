@@ -48,7 +48,8 @@ button {
 }
 
 .auth-shell,
-.app-shell {
+.app-shell,
+.public-shell {
   width: min(1200px, calc(100% - 28px));
   margin: 0 auto;
   padding: 24px 0 42px;
@@ -314,7 +315,9 @@ p {
 .match-view,
 .ended-view,
 .data-tab,
-.players-tab {
+.players-tab,
+.share-tab,
+.public-shell {
   display: grid;
   gap: 18px;
   animation: riseIn .45s ease both;
@@ -572,6 +575,58 @@ p {
   gap: 14px;
 }
 
+.lineup-check {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255,255,255,.04), rgba(255,255,255,.01)), var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.lineup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.lineup-card {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-top: 6px solid var(--team-color);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.lineup-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  min-height: 38px;
+  margin-bottom: 12px;
+}
+
+.mini-pill.guest {
+  border-color: var(--green);
+  box-shadow: 0 0 0 1px rgba(155, 227, 29, .14);
+}
+
+.mini-pill button {
+  margin-left: 6px;
+  border: 0;
+  color: #ff8a8a;
+  background: transparent;
+  font-weight: 950;
+}
+
+.complete-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
 .goal-form {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
@@ -673,6 +728,78 @@ p {
   background: linear-gradient(90deg, var(--green-2), var(--green));
 }
 
+.share-panel,
+.public-summary-card,
+.champion-history {
+  grid-column: 1 / -1;
+}
+
+.share-link-box {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  margin-top: 14px;
+}
+
+.share-link-box input {
+  color: var(--green);
+  font-weight: 850;
+}
+
+.share-status {
+  margin: 10px 0 0;
+  color: var(--green);
+  font-weight: 850;
+}
+
+.share-status.error {
+  color: #ff7777;
+}
+
+.ranking-card {
+  align-content: start;
+}
+
+.ranking-list {
+  display: grid;
+  gap: 9px;
+}
+
+.ranking-row {
+  display: grid;
+  grid-template-columns: 34px minmax(96px, .9fr) minmax(90px, 1fr) 78px;
+  gap: 10px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.ranking-row strong {
+  color: var(--ink);
+}
+
+.ranking-row span:last-child {
+  color: var(--green);
+  text-align: right;
+}
+
+.rank-position {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #071006;
+  background: var(--green);
+  font-weight: 950;
+}
+
 .card-actions {
   display: flex;
   align-items: center;
@@ -735,10 +862,12 @@ p {
 
 @media (max-width: 920px) {
   .auth-shell,
+  .public-shell,
   .teams-grid,
   .setup-options,
   .players-layout,
   .scoreboard,
+  .lineup-grid,
   .match-tools,
   .goal-form,
   .data-grid,
@@ -768,9 +897,16 @@ p {
   .auth-tabs,
   .data-tabs,
   .inline-form,
-  .settings-form {
+  .settings-form,
+  .complete-form,
+  .share-link-box,
+  .ranking-row {
     width: 100%;
     grid-template-columns: 1fr;
+  }
+
+  .ranking-row span:last-child {
+    text-align: left;
   }
 
   .main-nav button,

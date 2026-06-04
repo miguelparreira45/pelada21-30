@@ -32,6 +32,13 @@ const els = {
   gameTab: document.querySelector("#gameTab"),
   playersTab: document.querySelector("#playersTab"),
   dataTab: document.querySelector("#dataTab"),
+  shareTab: document.querySelector("#shareTab"),
+  shareGrid: document.querySelector("#shareGrid"),
+  publishShare: document.querySelector("#publishShare"),
+  publicShell: document.querySelector("#publicShell"),
+  publicProfile: document.querySelector("#publicProfile"),
+  publicTitle: document.querySelector("#publicTitle"),
+  publicGrid: document.querySelector("#publicGrid"),
   playerProfileForm: document.querySelector("#playerProfileForm"),
   playerFormTitle: document.querySelector("#playerFormTitle"),
   registeredPlayers: document.querySelector("#registeredPlayers"),
@@ -49,6 +56,7 @@ const els = {
   goalLimitInput: document.querySelector("#goalLimitInput"),
   leftPanel: document.querySelector("#leftPanel"),
   rightPanel: document.querySelector("#rightPanel"),
+  lineupCheck: document.querySelector("#lineupCheck"),
   timer: document.querySelector("#timer"),
   startCountdown: document.querySelector("#startCountdown"),
   endTimedMatch: document.querySelector("#endTimedMatch"),
@@ -315,6 +323,9 @@ async function migrateLocalProfileToCloudIfNeeded(cloudProfile) {
     mapped.seasonName = cloudProfile.seasons.find((season) => season.id === mapped.seasonId)?.name || session.seasonName;
     teamKeys().forEach((teamKey) => {
       mapped.teams[teamKey].players = (mapped.teams[teamKey].players || []).map(remapRef);
+      if (mapped.guests?.[teamKey]) {
+        mapped.guests[teamKey] = mapped.guests[teamKey].map(remapRef);
+      }
     });
     mapped.stats = (mapped.stats || []).map((stat) => {
       const nextId = playerIdMap[stat.id] || playerIdMap[stat.playerId] || stat.id;
@@ -408,6 +419,7 @@ function ensureProfileDefaults(item) {
   item.sessions ||= [];
   item.players ||= [];
   item.seasons ||= [];
+  item.publicShares ||= {};
   if (!item.seasons.length) {
     item.seasons.push({
       id: crypto.randomUUID(),
@@ -483,8 +495,10 @@ function showAppTab(tab) {
   els.gameTab.classList.toggle("hidden", tab !== "game");
   els.playersTab.classList.toggle("hidden", tab !== "players");
   els.dataTab.classList.toggle("hidden", tab !== "data");
+  els.shareTab.classList.toggle("hidden", tab !== "share");
   if (tab === "players") renderPlayers();
   if (tab === "data") renderData();
+  if (tab === "share") renderShare();
 }
 
 function teamKeys() {
@@ -497,6 +511,26 @@ function activeTeamKeys() {
 
 function benchTeamKey() {
   return draft.currentMatch?.bench || draft.finishedMatch?.bench;
+}
+
+function matchRoster(teamKey, match = draft.currentMatch || draft.finishedMatch) {
+  const base = draft.teams?.[teamKey]?.players || match?.teams?.[teamKey]?.players || [];
+  const guests = match?.guests?.[teamKey] || [];
+  return [...new Set([...base, ...guests])];
+}
+
+function baseTeamOfPlayer(ref) {
+  return teamKeys().find((key) => draft.teams[key].players.includes(ref)) || null;
+}
+
+function availableGuestPlayers(targetTeamKey) {
+  const match = draft.currentMatch;
+  if (!match) return [];
+  const alreadyInTarget = new Set(matchRoster(targetTeamKey, match));
+  return profile.players.filter((player) => {
+    if (alreadyInTarget.has(player.id)) return false;
+    return teamKeys().some((key) => draft.teams[key].players.includes(player.id));
+  });
 }
 
 function findPlayer(ref) {
@@ -982,6 +1016,7 @@ function renderMatch() {
   els.matchRule.textContent = `${match.goalLimit} gol${match.goalLimit === 1 ? "" : "s"} ou ${match.durationMinutes} minuto${match.durationMinutes === 1 ? "" : "s"}`;
   els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
   els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
+  renderLineupCheck();
   renderBench();
   renderGoalForm();
   renderStats();
@@ -991,11 +1026,64 @@ function renderMatch() {
 function renderTeamPanel(teamKey) {
   const meta = TEAM_META[teamKey];
   const score = draft.currentMatch.score[teamKey];
-  const players = draft.teams[teamKey].players.map((ref) => `<span class="mini-pill ${playerType(ref)}">${escapeHtml(playerDisplayName(ref))}</span>`).join("");
+  const players = matchRoster(teamKey).map((ref) => {
+    const isGuest = !draft.teams[teamKey].players.includes(ref);
+    return `<span class="mini-pill ${playerType(ref)} ${isGuest ? "guest" : ""}">${escapeHtml(playerDisplayName(ref))}${isGuest ? " emprestado" : ""}</span>`;
+  }).join("");
   return `
     <p class="eyebrow">Time ${meta.name}</p>
     <div class="score" data-score-team="${teamKey}">${score}</div>
     <div class="players-mini">${players}</div>
+  `;
+}
+
+function renderLineupCheck() {
+  const match = draft.currentMatch;
+  if (!match) {
+    els.lineupCheck.innerHTML = "";
+    return;
+  }
+  els.lineupCheck.innerHTML = `
+    <div class="section-head">
+      <div>
+        <p class="eyebrow">Conferencia do elenco</p>
+        <h2>Complete o time antes de iniciar</h2>
+      </div>
+    </div>
+    <div class="lineup-grid">
+      ${match.playing.map((teamKey) => renderLineupTeam(teamKey)).join("")}
+    </div>
+  `;
+}
+
+function renderLineupTeam(teamKey) {
+  const base = draft.teams[teamKey].players;
+  const guests = draft.currentMatch.guests[teamKey] || [];
+  const options = availableGuestPlayers(teamKey);
+  return `
+    <article class="lineup-card" style="--team-color: ${TEAM_META[teamKey].color}">
+      <h3>${TEAM_META[teamKey].name}</h3>
+      <div class="lineup-list">
+        ${base.map((ref) => `<span class="mini-pill ${playerType(ref)}">${escapeHtml(playerDisplayName(ref))}</span>`).join("")}
+        ${guests.map((ref) => `
+          <span class="mini-pill ${playerType(ref)} guest">
+            ${escapeHtml(playerDisplayName(ref))} emprestado
+            <button type="button" data-remove-guest="${ref}" data-team="${teamKey}">x</button>
+          </span>
+        `).join("")}
+      </div>
+      <form class="complete-form" data-complete-team="${teamKey}">
+        <label>Completar elenco
+          <select name="guest" ${options.length ? "" : "disabled"}>
+            ${options.length ? `<option value="">Escolha jogador</option>` + options.map((player) => {
+              const baseTeam = baseTeamOfPlayer(player.id);
+              return `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${TEAM_META[baseTeam]?.name || "fora"})</option>`;
+            }).join("") : `<option value="">Sem jogadores disponiveis</option>`}
+          </select>
+        </label>
+        <button class="secondary-action" type="submit" ${options.length ? "" : "disabled"}>Adicionar</button>
+      </form>
+    </article>
   `;
 }
 
@@ -1020,7 +1108,7 @@ function renderGoalForm() {
 
 function fillPlayerOptions() {
   const teamKey = els.goalTeam.value;
-  const players = draft.teams[teamKey]?.players || [];
+  const players = matchRoster(teamKey);
   els.goalPlayer.innerHTML = players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
   els.assistPlayer.innerHTML = `<option value="">Sem assistencia</option>` + players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
 }
@@ -1122,6 +1210,7 @@ function startMatch(playing, bench) {
     playing,
     bench,
     score: { [playing[0]]: 0, [playing[1]]: 0 },
+    guests: { [playing[0]]: [], [playing[1]]: [] },
     goals: [],
     remaining: durationMinutes * 60,
     durationMinutes,
@@ -1197,8 +1286,8 @@ function storeFinishedMatch() {
   if (!draft.finishedMatch?.winner || draft.finishedMatch.stored) return;
   const match = { ...draft.finishedMatch, stored: true };
   draft.completedMatches.push(match);
-  draft.teams[match.winner].players.forEach((name) => {
-    ensurePlayerStats(match.winner, name).wins += 1;
+  matchRoster(match.winner, match).forEach((ref) => {
+    ensurePlayerStats(match.winner, ref).wins += 1;
   });
   draft.finishedMatch.stored = true;
   saveStore();
@@ -1324,6 +1413,254 @@ function renderData() {
       </div>
     </section>
   `;
+}
+
+function renderShare() {
+  const payload = buildSharePayload();
+  const seasonName = payload.season.name || "Temporada atual";
+  const publishedSlug = profile?.publicShares?.[payload.season.id];
+  const shareLink = publishedSlug === payload.slug ? publicShareUrl(payload.slug) : "";
+
+  els.shareGrid.innerHTML = `
+    <section class="data-card share-panel">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">${escapeHtml(seasonName)}</p>
+          <h3>Link para compartilhar</h3>
+        </div>
+      </div>
+      <p>Esse link mostra apenas os rankings e os resumos da temporada. Ninguem consegue editar jogos, jogadores ou acessar o painel por ele.</p>
+      ${isCloudMode
+        ? `
+          <div class="share-link-box">
+            <input id="shareUrl" readonly value="${escapeHtml(shareLink || "Clique em gerar link publico")}">
+            <button class="secondary-action" data-copy-share type="button" ${shareLink ? "" : "disabled"}>Copiar</button>
+          </div>
+          <p class="share-status" id="shareStatus">${shareLink ? "Link publico pronto para envio." : "Clique em gerar link publico para publicar o resumo atual."}</p>
+        `
+        : `<p class="share-status error">Para criar link publico, entre pelo modo nuvem.</p>`}
+    </section>
+    ${renderPublicPayload(payload, true)}
+  `;
+}
+
+function buildSharePayload() {
+  const season = currentSeason();
+  const seasonSessions = (profile?.sessions || []).filter((session) => session.seasonId === profile.currentSeasonId);
+  const stats = buildOverallStats(seasonSessions);
+  const rankings = {
+    goals: rankingFor(stats, "goals"),
+    assists: rankingFor(stats, "assists"),
+    hot: rankingFor(stats, "wins")
+  };
+  const teamWins = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  seasonSessions.forEach((session) => {
+    const key = session.winnerTeam?.key;
+    if (key && teamWins[key] !== undefined) teamWins[key] += 1;
+  });
+  const championKey = teamKeys().sort((a, b) => teamWins[b] - teamWins[a])[0];
+  const championValue = teamWins[championKey] || 0;
+
+  return {
+    profile: {
+      peladaName: profile?.peladaName || "PeladaFast",
+      username: profile?.username || "pelada"
+    },
+    season: {
+      id: season?.id || "",
+      name: season?.name || "Temporada atual"
+    },
+    slug: shareSlug(),
+    generatedAt: new Date().toISOString(),
+    totals: {
+      sessions: seasonSessions.length,
+      matches: seasonSessions.reduce((sum, session) => sum + (session.matches?.length || 0), 0)
+    },
+    championTeam: {
+      key: championValue ? championKey : "",
+      name: championValue ? TEAM_META[championKey].name : "Sem campeao",
+      wins: championValue
+    },
+    rankings,
+    championSessions: seasonSessions
+      .filter((session) => session.winnerTeam?.key)
+      .slice()
+      .sort((a, b) => new Date(b.date) - new Date(a.date))
+      .map((session) => ({
+        id: session.id,
+        date: session.date,
+        teamKey: session.winnerTeam.key,
+        teamName: TEAM_META[session.winnerTeam.key]?.name || session.winnerTeam.label,
+        label: session.winnerTeam.label,
+        players: championPlayers(session)
+      }))
+  };
+}
+
+function rankingFor(stats, field) {
+  return stats
+    .filter((item) => Number(item[field]) > 0)
+    .sort((a, b) => Number(b[field]) - Number(a[field]) || a.name.localeCompare(b.name))
+    .map((item, index) => ({
+      position: index + 1,
+      name: item.name,
+      value: Number(item[field]) || 0
+    }));
+}
+
+function championPlayers(session) {
+  const key = session.winnerTeam?.key;
+  if (!key) return [];
+  const base = (session.teams?.[key]?.players || []).map((ref) => sessionPlayerName(session, ref));
+  const guests = (session.matches || [])
+    .flatMap((match) => match.guests?.[key] || [])
+    .map((ref) => `${sessionPlayerName(session, ref)} emprestado`);
+  return [...new Set([...base, ...guests])];
+}
+
+function sessionPlayerName(session, ref) {
+  const registered = findPlayer(ref);
+  if (registered) return `${registered.firstName} ${registered.lastName}`.trim();
+  const stat = (session.stats || []).find((item) => item.id === ref || item.playerId === ref);
+  return stat?.name || String(ref);
+}
+
+function shareSlug() {
+  if (!profile?.username || !profile?.currentSeasonId) return "";
+  return `${profile.username}-${profile.currentSeasonId.slice(0, 8)}`
+    .toLowerCase()
+    .replace(/[^a-z0-9-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
+
+function publicShareUrl(slug) {
+  return `${window.location.origin}${window.location.pathname}?share=${encodeURIComponent(slug)}`;
+}
+
+function renderPublicPayload(payload, isPreview = false) {
+  const title = isPreview ? "Previa publica" : payload.profile.peladaName;
+  return `
+    <section class="data-card public-summary-card">
+      <p class="eyebrow">${escapeHtml(title)}</p>
+      <h3>${escapeHtml(payload.season.name)}</h3>
+      <div class="leader-grid">
+        <div class="leader-box"><span>Peladas</span><strong>${payload.totals.sessions}</strong></div>
+        <div class="leader-box"><span>Partidas</span><strong>${payload.totals.matches}</strong></div>
+        <div class="leader-box"><span>Time campeao</span><strong>${escapeHtml(payload.championTeam.name)}${payload.championTeam.wins ? ` (${payload.championTeam.wins})` : ""}</strong></div>
+      </div>
+    </section>
+    <section class="data-card ranking-card">
+      <h3>Artilheiros</h3>
+      ${renderPublicRanking(payload.rankings.goals, "gol")}
+    </section>
+    <section class="data-card ranking-card">
+      <h3>Assistentes</h3>
+      ${renderPublicRanking(payload.rankings.assists, "assist.")}
+    </section>
+    <section class="data-card ranking-card">
+      <h3>Pe quente</h3>
+      ${renderPublicRanking(payload.rankings.hot, "vitoria")}
+    </section>
+    <section class="data-card champion-history">
+      <h3>Campeoes da temporada</h3>
+      <div class="data-list">
+        ${payload.championSessions.length
+          ? payload.championSessions.map(renderChampionSession).join("")
+          : "<p>Nenhuma pelada finalizada nesta temporada ainda.</p>"}
+      </div>
+    </section>
+  `;
+}
+
+function renderPublicRanking(items, label) {
+  if (!items.length) return "<p>Sem dados ainda.</p>";
+  const max = Math.max(1, ...items.map((item) => item.value));
+  return `
+    <div class="ranking-list">
+      ${items.map((item) => `
+        <div class="ranking-row">
+          <span class="rank-position">${item.position}</span>
+          <strong>${escapeHtml(item.name)}</strong>
+          <div class="bar-track"><i style="width: ${(item.value / max) * 100}%"></i></div>
+          <span>${item.value} ${label}${item.value === 1 ? "" : "s"}</span>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderChampionSession(session) {
+  const date = new Date(session.date).toLocaleString("pt-BR");
+  return `
+    <article class="leader-box">
+      <p class="eyebrow">${escapeHtml(date)}</p>
+      <h3>${escapeHtml(session.label)}</h3>
+      <div class="players-mini">
+        ${session.players.length
+          ? session.players.map((name) => `<span class="mini-pill">${escapeHtml(name)}</span>`).join("")
+          : "<span class=\"mini-pill\">Sem jogadores registrados</span>"}
+      </div>
+    </article>
+  `;
+}
+
+async function publishSharePage() {
+  if (!isCloudMode || !supabaseClient || !currentUser) {
+    renderShare();
+    return;
+  }
+  const payload = buildSharePayload();
+  const row = {
+    profile_id: currentUser.id,
+    season_id: payload.season.id || null,
+    slug: payload.slug,
+    payload,
+    is_active: true
+  };
+  const { error } = await supabaseClient
+    .from("public_share_pages")
+    .upsert(row, { onConflict: "slug" });
+  if (error) {
+    alert("Nao consegui gerar o link publico. Confira se voce rodou o SQL atualizado no Supabase.");
+    console.warn("Falha ao publicar pagina publica", error);
+    return;
+  }
+  profile.publicShares ||= {};
+  profile.publicShares[payload.season.id] = payload.slug;
+  saveStore();
+  renderShare();
+  const input = document.querySelector("#shareUrl");
+  if (navigator.clipboard && input?.value) {
+    await navigator.clipboard.writeText(input.value).catch(() => {});
+    const status = document.querySelector("#shareStatus");
+    if (status) status.textContent = "Link publico gerado e copiado.";
+  }
+}
+
+async function loadPublicShare(slug) {
+  els.authShell.classList.add("hidden");
+  els.appShell.classList.add("hidden");
+  els.publicShell.classList.remove("hidden");
+  if (!supabaseClient) {
+    els.publicGrid.innerHTML = `<section class="data-card"><h3>Link indisponivel</h3><p>Este site ainda nao esta conectado na nuvem.</p></section>`;
+    return;
+  }
+  const { data, error } = await supabaseClient
+    .from("public_share_pages")
+    .select("payload")
+    .eq("slug", slug)
+    .eq("is_active", true)
+    .maybeSingle();
+
+  if (error || !data?.payload) {
+    els.publicGrid.innerHTML = `<section class="data-card"><h3>Resumo nao encontrado</h3><p>O link pode ter sido removido ou ainda nao foi publicado.</p></section>`;
+    return;
+  }
+  const payload = data.payload;
+  els.publicProfile.textContent = `@${payload.profile?.username || "pelada"}`;
+  els.publicTitle.textContent = payload.profile?.peladaName || "Resumo da pelada";
+  els.publicGrid.innerHTML = renderPublicPayload(payload);
 }
 
 function renderCharts(sessions) {
@@ -1527,7 +1864,11 @@ function recalculateSession(session) {
   session.matches.forEach((match) => {
     if (!match.winner) return;
     session.winsByTeam[match.winner] += 1;
-    session.teams[match.winner].players.forEach((ref) => {
+    const winnerRoster = [
+      ...(session.teams[match.winner]?.players || []),
+      ...((match.guests && match.guests[match.winner]) || [])
+    ];
+    winnerRoster.forEach((ref) => {
       const id = playerStatId(ref);
       if (!statsById[id]) {
         statsById[id] = { id, playerId: id, name: playerDisplayName(ref), teamKey: match.winner, goals: 0, assists: 0, wins: 0 };
@@ -1711,6 +2052,29 @@ els.teamsGrid.addEventListener("click", (event) => {
   render();
 });
 
+els.lineupCheck.addEventListener("submit", (event) => {
+  const form = event.target.closest("[data-complete-team]");
+  if (!form || !draft.currentMatch) return;
+  event.preventDefault();
+  const teamKey = form.dataset.completeTeam;
+  const ref = form.elements.guest.value;
+  if (!ref) return;
+  draft.currentMatch.guests[teamKey] ||= [];
+  if (!draft.currentMatch.guests[teamKey].includes(ref)) {
+    draft.currentMatch.guests[teamKey].push(ref);
+  }
+  render();
+});
+
+els.lineupCheck.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove-guest]");
+  if (!button || !draft.currentMatch) return;
+  const teamKey = button.dataset.team;
+  const ref = button.dataset.removeGuest;
+  draft.currentMatch.guests[teamKey] = (draft.currentMatch.guests[teamKey] || []).filter((item) => item !== ref);
+  render();
+});
+
 els.drawMatch.addEventListener("click", startFirstMatch);
 els.startCountdown.addEventListener("click", startCountdown);
 els.endTimedMatch.addEventListener("click", () => finishCurrentMatch("time"));
@@ -1723,6 +2087,16 @@ els.winnerChoice.addEventListener("click", (event) => {
   if (button) chooseWinner(button.dataset.winner);
 });
 els.newSession.addEventListener("click", resetDraft);
+els.publishShare.addEventListener("click", publishSharePage);
+els.shareGrid.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-copy-share]");
+  if (!button) return;
+  const input = document.querySelector("#shareUrl");
+  if (!input?.value || button.disabled) return;
+  navigator.clipboard?.writeText(input.value).catch(() => {});
+  const status = document.querySelector("#shareStatus");
+  if (status) status.textContent = "Link copiado.";
+});
 els.playerProfileForm.addEventListener("submit", savePlayerProfile);
 els.cancelPlayerEdit.addEventListener("click", () => {
   els.playerProfileForm.reset();
@@ -1767,6 +2141,11 @@ els.dataGrid.addEventListener("submit", (event) => {
 async function initApp() {
   supabaseClient = setupSupabaseClient();
   isCloudMode = Boolean(supabaseClient);
+  const publicSlug = new URLSearchParams(window.location.search).get("share");
+  if (publicSlug) {
+    await loadPublicShare(publicSlug);
+    return;
+  }
 
   if (isCloudMode) {
     let data;

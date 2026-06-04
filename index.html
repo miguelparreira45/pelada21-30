@@ -81,6 +81,7 @@
           <button class="tab-button active" data-app-tab="game">Jogo</button>
           <button class="tab-button" data-app-tab="players">Jogadores</button>
           <button class="tab-button" data-app-tab="data">Dados</button>
+          <button class="tab-button" data-app-tab="share">Compartilhar</button>
           <button class="secondary-action" id="logoutButton">Sair</button>
         </nav>
       </header>
@@ -137,6 +138,8 @@
             </div>
             <article class="team-panel" id="rightPanel"></article>
           </div>
+
+          <section class="lineup-check" id="lineupCheck"></section>
 
           <div class="bench-strip" id="benchStrip"></div>
 
@@ -225,6 +228,31 @@
         </div>
         <div class="data-grid" id="dataGrid"></div>
       </section>
+
+      <section class="share-tab hidden" id="shareTab">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Página pública</p>
+            <h2>Resumo compartilhável</h2>
+          </div>
+          <button class="primary-action" id="publishShare">Gerar link público</button>
+        </div>
+        <div class="data-grid" id="shareGrid"></div>
+      </section>
+    </main>
+
+    <main class="public-shell hidden" id="publicShell">
+      <header class="app-header">
+        <div class="app-brand">
+          <img src="peladafast-logo.png" alt="PeladaFast">
+          <div>
+            <p class="eyebrow" id="publicProfile">@pelada</p>
+            <h1 id="publicTitle">Resumo da pelada</h1>
+            <span class="sync-badge cloud">Visualização pública</span>
+          </div>
+        </div>
+      </header>
+      <section class="data-grid" id="publicGrid"></section>
     </main>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
