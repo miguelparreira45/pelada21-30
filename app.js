@@ -590,7 +590,8 @@ async function registerProfile(event) {
       });
       if (error) throw error;
       if (!data.session) {
-        setAuthMessage("Cadastro criado. Se o Supabase pedir confirmacao, confirme no email e depois entre.");
+        localStorage.setItem("peladafast-pending-signup", JSON.stringify({ peladaName, username, email, phone }));
+        setAuthMessage("Cadastro criado. Confirme o email se o Supabase pedir. No primeiro acesso, entre usando o email; depois o usuario passa a funcionar.");
         return;
       }
       currentUser = data.user;
@@ -660,7 +661,12 @@ async function loginProfile(event) {
       enterProfile(cloudProfile);
       return;
     } catch (error) {
-      setAuthMessage(error.message || "Usuario ou senha incorretos.", true);
+      const pending = JSON.parse(localStorage.getItem("peladafast-pending-signup") || "null");
+      if (pending && normalizeUsername(identity) === pending.username) {
+        setAuthMessage("Esse cadastro ainda precisa ser ativado. Entre primeiro usando o email cadastrado ou desative a confirmacao de email no Supabase.", true);
+      } else {
+        setAuthMessage(error.message || "Usuario ou senha incorretos.", true);
+      }
       return;
     }
   }
