@@ -1373,22 +1373,27 @@ function renderMatchHistoryPreview(extraMatch = null) {
 function renderFinalSummary() {
   const summary = draft.finalSummary;
   els.finalView.innerHTML = `
-    <p class="eyebrow">Pelada finalizada</p>
-    <h2>${escapeHtml(summary.winnerTeam.label)}</h2>
-    <div class="leader-grid">
-      <div class="leader-box"><span>Time vitorioso</span><strong>${escapeHtml(summary.winnerTeam.label)}</strong></div>
-      <div class="leader-box"><span>Artilheiro do dia</span><strong>${escapeHtml(summary.topScorer.label)}</strong></div>
-      <div class="leader-box"><span>Garcom do dia</span><strong>${escapeHtml(summary.topAssistant.label)}</strong></div>
-      <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(summary.topHot.label)}</strong></div>
-      <div class="leader-box"><span>Destaque da noite</span><strong>${escapeHtml(summary.topMvp?.label || "Sem destaque")}</strong></div>
-    </div>
+    <section class="podium-card" id="podiumCard">
+      <img src="peladafast-logo.png" alt="PeladaFast">
+      <p class="eyebrow">Pelada finalizada</p>
+      <h2>${escapeHtml(summary.winnerTeam.label)}</h2>
+      <div class="leader-grid">
+        <div class="leader-box"><span>Equipe campea</span><strong>${escapeHtml(summary.winnerTeam.label)}</strong></div>
+        <div class="leader-box"><span>Artilheiro</span><strong>${escapeHtml(summary.topScorer.label)}</strong></div>
+        <div class="leader-box"><span>Maior assistente</span><strong>${escapeHtml(summary.topAssistant.label)}</strong></div>
+        <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(summary.topHot.label)}</strong></div>
+        <div class="leader-box"><span>Destaque</span><strong>${escapeHtml(summary.topMvp?.label || "Sem destaque")}</strong></div>
+      </div>
+    </section>
     <div class="next-actions">
       <button class="primary-action big" id="freshSession">Nova pelada</button>
+      <button class="primary-action" id="exportPodiumImage">Imagem WhatsApp</button>
       <button class="secondary-action" id="copyFinalReport">Copiar resumo</button>
       <button class="secondary-action" id="openDataFromFinal">Ver dados</button>
     </div>
   `;
   document.querySelector("#freshSession").addEventListener("click", resetDraft);
+  document.querySelector("#exportPodiumImage").addEventListener("click", exportPodiumImage);
   document.querySelector("#copyFinalReport").addEventListener("click", () => {
     navigator.clipboard?.writeText(summary.report || "").then(() => alert("Resumo copiado."));
   });
@@ -1713,7 +1718,7 @@ function renderRatingView() {
       `).join("")}
       <div class="next-actions">
         <button class="secondary-action" id="backToLastMatch" type="button">Voltar para corrigir</button>
-        <button class="primary-action big" type="submit">Salvar notas e finalizar</button>
+        <button class="primary-action big" data-complete-ratings type="submit">Salvar notas e finalizar</button>
       </div>
     </form>
   `;
@@ -1735,9 +1740,10 @@ function renderSessionReview() {
   `;
 }
 
-function completeSessionRatings(event) {
+async function completeSessionRatings(event) {
   event.preventDefault();
-  const form = event.currentTarget;
+  const form = event.currentTarget.closest("form") || document.querySelector("#ratingForm");
+  if (!form || draft.mode !== "rating") return;
   draft.playerRatings = {};
   Object.values(draft.playerStats).forEach((item) => {
     draft.playerRatings[item.id] = Number(form.elements[`rating_${item.id}`]?.value) || 3;
@@ -1747,7 +1753,17 @@ function completeSessionRatings(event) {
   draft.finalSummary = summary;
   draft.mode = "final";
   saveStore();
+  if (isCloudMode && currentUser) {
+    const { error } = await supabaseClient.from("sessions").upsert(toSessionRow(summary));
+    if (error) {
+      alert("Pelada finalizada, mas nao consegui confirmar o salvamento na nuvem agora. Ela continua salva neste aparelho e tentara sincronizar novamente.");
+      console.warn("Falha ao salvar pelada finalizada", error);
+    }
+  }
   render();
+  if (profile.sessions.some((session) => session.id === summary.id)) {
+    setSyncStatus(isCloudMode ? "Pelada salva na nuvem" : "Pelada salva", isCloudMode ? "cloud" : "local");
+  }
 }
 
 function reopenLastFinishedMatch() {
@@ -2457,6 +2473,69 @@ function downloadTextFile(filename, content, type = "text/plain") {
   URL.revokeObjectURL(url);
 }
 
+function exportPodiumImage() {
+  if (!draft.finalSummary) return;
+  const summary = draft.finalSummary;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1350;
+  const ctx = canvas.getContext("2d");
+  const gradient = ctx.createLinearGradient(0, 0, 1080, 1350);
+  gradient.addColorStop(0, "#0b0f0b");
+  gradient.addColorStop(.55, "#111411");
+  gradient.addColorStop(1, "#20330d");
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "#9be31d";
+  ctx.lineWidth = 8;
+  ctx.strokeRect(38, 38, canvas.width - 76, canvas.height - 76);
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 34px Arial";
+  ctx.fillText("PELADAFAST", 78, 110);
+  ctx.fillStyle = "#f5f7f2";
+  ctx.font = "900 72px Arial";
+  wrapCanvasText(ctx, "Podio da pelada", 78, 205, 920, 82);
+  drawPodiumLine(ctx, "Equipe campea", summary.winnerTeam.label, 78, 390);
+  drawPodiumLine(ctx, "Artilheiro", summary.topScorer.label, 78, 555);
+  drawPodiumLine(ctx, "Maior assistente", summary.topAssistant.label, 78, 720);
+  drawPodiumLine(ctx, "Pe quente", summary.topHot.label, 78, 885);
+  drawPodiumLine(ctx, "Destaque", summary.topMvp?.label || "Sem destaque", 78, 1050);
+  ctx.fillStyle = "#9aa393";
+  ctx.font = "700 28px Arial";
+  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 78, 1260);
+  const link = document.createElement("a");
+  link.download = `peladafast-podio-${Date.now()}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+function drawPodiumLine(ctx, title, value, x, y) {
+  ctx.fillStyle = "rgba(155, 227, 29, .14)";
+  ctx.fillRect(x, y - 58, 924, 126);
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 30px Arial";
+  ctx.fillText(title.toUpperCase(), x + 28, y - 15);
+  ctx.fillStyle = "#f5f7f2";
+  ctx.font = "900 42px Arial";
+  wrapCanvasText(ctx, value, x + 28, y + 38, 860, 48);
+}
+
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = String(text).split(" ");
+  let line = "";
+  words.forEach((word, index) => {
+    const test = line ? `${line} ${word}` : word;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      ctx.fillText(line, x, y);
+      line = word;
+      y += lineHeight;
+    } else {
+      line = test;
+    }
+    if (index === words.length - 1) ctx.fillText(line, x, y);
+  });
+}
+
 function exportCsv() {
   const sessions = filteredSessions(activeDataTab);
   const rows = [["Data", "Temporada", "Jogador", "Gols", "Assistencias", "Vitorias", "Gol contra", "Nota", "Nota PeladaFast"]];
@@ -2698,6 +2777,11 @@ els.finalView.addEventListener("input", (event) => {
 });
 els.finalView.addEventListener("click", (event) => {
   if (event.target.closest("#backToLastMatch")) reopenLastFinishedMatch();
+  if (event.target.closest("[data-complete-ratings]")) {
+    event.preventDefault();
+    const form = event.target.closest("form");
+    if (form) completeSessionRatings({ preventDefault() {}, currentTarget: form, target: form });
+  }
 });
 els.finalView.addEventListener("submit", (event) => {
   if (event.target.matches("#ratingForm")) completeSessionRatings(event);
