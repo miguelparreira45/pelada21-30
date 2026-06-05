@@ -73,12 +73,14 @@ const els = {
   lineupCheck: document.querySelector("#lineupCheck"),
   timer: document.querySelector("#timer"),
   startCountdown: document.querySelector("#startCountdown"),
+  fullScoreMode: document.querySelector("#fullScoreMode"),
   endTimedMatch: document.querySelector("#endTimedMatch"),
   matchRule: document.querySelector("#matchRule"),
   matchLabel: document.querySelector("#matchLabel"),
   benchStrip: document.querySelector("#benchStrip"),
   goalForm: document.querySelector("#goalForm"),
   goalTeam: document.querySelector("#goalTeam"),
+  ownGoal: document.querySelector("#ownGoal"),
   goalPlayer: document.querySelector("#goalPlayer"),
   assistPlayer: document.querySelector("#assistPlayer"),
   undoLastGoal: document.querySelector("#undoLastGoal"),
@@ -91,6 +93,9 @@ const els = {
   finishSession: document.querySelector("#finishSession"),
   dataGrid: document.querySelector("#dataGrid"),
   newSession: document.querySelector("#newSession"),
+  exportCsv: document.querySelector("#exportCsv"),
+  exportBackup: document.querySelector("#exportBackup"),
+  importBackup: document.querySelector("#importBackup"),
   logoutButton: document.querySelector("#logoutButton"),
   confettiCanvas: document.querySelector("#confettiCanvas")
 };
@@ -944,19 +949,31 @@ function renderPlayers() {
   els.registeredPlayers.innerHTML = profile.players
     .slice()
     .sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
-    .map((player) => `
-      <article class="registered-player ${player.memberType}">
-        ${renderPlayerAvatar(player.id)}
-        <div>
-          <strong>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</strong>
-          <span>${player.memberType === "mensalista" ? "Mensalista" : "Suplente"}</span>
+    .map(renderRegisteredPlayerCard).join("");
+}
+
+function renderRegisteredPlayerCard(player) {
+  const stats = playerSummary(player.id);
+  return `
+    <article class="registered-player ${player.memberType}">
+      ${renderPlayerAvatar(player.id)}
+      <div>
+        <strong>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</strong>
+        <span>${player.memberType === "mensalista" ? "Mensalista" : "Suplente"} | Nota ${stats.rating || "3.0"} | Forma ${Math.round(playerPower(player.id))}</span>
+        <div class="player-metrics">
+          <small>${stats.goals} G</small>
+          <small>${stats.assists} A</small>
+          <small>${stats.wins} V</small>
+          <small>${stats.ownGoals} GC</small>
         </div>
-        <div class="card-actions">
-          <button class="secondary-action" data-edit-player="${player.id}">Editar</button>
-          <button class="danger-action" data-delete-player="${player.id}">Remover</button>
-        </div>
-      </article>
-    `).join("");
+        <div class="badge-list">${playerBadges(stats).map((badge) => `<span class="mini-pill trophy">${badge}</span>`).join("") || "<span class=\"mini-pill\">Sem selo ainda</span>"}</div>
+      </div>
+      <div class="card-actions">
+        <button class="secondary-action" data-edit-player="${player.id}">Editar</button>
+        <button class="danger-action" data-delete-player="${player.id}">Remover</button>
+      </div>
+    </article>
+  `;
 }
 
 function readPhotoFile(file) {
@@ -1070,6 +1087,7 @@ function renderMatch() {
   els.rightPanel.innerHTML = renderTeamPanel(right);
   els.timer.textContent = formatClock(match.remaining);
   els.matchRule.textContent = `${match.goalLimit} gol${match.goalLimit === 1 ? "" : "s"} ou ${match.durationMinutes} minuto${match.durationMinutes === 1 ? "" : "s"}`;
+  els.fullScoreMode.textContent = els.matchView.classList.contains("full-score") ? "Sair do placar cheio" : "Placar cheio";
   els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
   els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
   renderLineupCheck();
@@ -1077,6 +1095,11 @@ function renderMatch() {
   renderGoalForm();
   renderStats();
   startTimer();
+}
+
+function toggleFullScoreMode() {
+  els.matchView.classList.toggle("full-score");
+  render();
 }
 
 function renderTeamPanel(teamKey) {
@@ -1166,18 +1189,22 @@ function renderGoalForm() {
 
 function fillPlayerOptions() {
   const teamKey = els.goalTeam.value;
-  const players = matchRoster(teamKey);
+  const ownGoal = els.ownGoal.checked;
+  const opponentKey = activeTeamKeys().find((key) => key !== teamKey);
+  const players = ownGoal ? matchRoster(opponentKey) : sortGoalPlayers(matchRoster(teamKey));
   const previousScorer = players.includes(els.goalPlayer.value) ? els.goalPlayer.value : players[0] || "";
   const previousAssistant = els.assistPlayer.value;
   els.goalPlayer.innerHTML = players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
   els.goalPlayer.value = previousScorer;
   const scorer = els.goalPlayer.value || players[0] || "";
   const assistOptions = players.filter((ref) => ref !== scorer);
-  els.assistPlayer.innerHTML = assistOptions.length
+  els.assistPlayer.innerHTML = ownGoal
+    ? `<option value="">Gol contra nao tem assistencia</option>`
+    : assistOptions.length
     ? `<option value="">Escolha a assistencia</option>` + assistOptions.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")
     : `<option value="">Sem outro jogador no time</option>`;
-  if (assistOptions.includes(previousAssistant)) els.assistPlayer.value = previousAssistant;
-  els.assistPlayer.disabled = !assistOptions.length;
+  if (!ownGoal && assistOptions.includes(previousAssistant)) els.assistPlayer.value = previousAssistant;
+  els.assistPlayer.disabled = ownGoal || !assistOptions.length;
   updateGoalFormState();
 }
 
@@ -1185,7 +1212,17 @@ function updateGoalFormState() {
   const submit = els.goalForm.querySelector("button[type='submit']");
   if (!submit) return;
   const canRegisterGoal = Boolean(draft.currentMatch?.isRunning || draft.currentMatch?.isTimeUp);
-  submit.disabled = !canRegisterGoal || !els.goalPlayer.value || !els.assistPlayer.value || els.goalPlayer.value === els.assistPlayer.value;
+  submit.disabled = !canRegisterGoal || !els.goalPlayer.value || (!els.ownGoal.checked && (!els.assistPlayer.value || els.goalPlayer.value === els.assistPlayer.value));
+}
+
+function sortGoalPlayers(players) {
+  return players.slice().sort((a, b) => {
+    const statA = draft.playerStats[playerStatId(a)] || {};
+    const statB = draft.playerStats[playerStatId(b)] || {};
+    const liveA = (statA.goals || 0) * 3 + (statA.assists || 0) * 2;
+    const liveB = (statB.goals || 0) * 3 + (statB.assists || 0) * 2;
+    return liveB - liveA || playerPower(b) - playerPower(a) || playerDisplayName(a).localeCompare(playerDisplayName(b));
+  });
 }
 
 function renderStats() {
@@ -1205,7 +1242,7 @@ function renderStats() {
   els.statsList.innerHTML = stats.map((item) => `
     <div class="stat-row">
       <strong>${escapeHtml(item.name)} <small>(${teamName(item.teamKey)})</small></strong>
-      <span>${item.goals} G / ${item.assists} A / ${item.wins} V</span>
+      <span>${item.goals || 0} G / ${item.assists || 0} A / ${item.wins || 0} V${item.ownGoals ? ` / ${item.ownGoals} GC` : ""}</span>
     </div>
   `).join("");
   renderTimeline();
@@ -1225,8 +1262,8 @@ function renderTimeline() {
         const index = number - 1;
         return `
           <article class="timeline-item" style="--team-color: ${teamColor(goal.teamKey)}">
-            <strong>${number}. ${teamName(goal.teamKey)} - ${escapeHtml(playerDisplayName(goal.scorer))}</strong>
-            <span>${formatClock(goal.at)} | Assistencia: ${escapeHtml(playerDisplayName(goal.assistant))}</span>
+            <strong>${number}. ${teamName(goal.teamKey)} - ${goal.ownGoal ? "Gol contra" : escapeHtml(playerDisplayName(goal.scorer))}</strong>
+            <span>${formatClock(goal.at)} | ${goal.ownGoal ? `Contra de ${escapeHtml(playerDisplayName(goal.scorer))}` : `Assistencia: ${escapeHtml(playerDisplayName(goal.assistant))}`}</span>
             <div class="timeline-actions">
               <button class="secondary-action" data-edit-goal="${index}" type="button">Corrigir</button>
               <button class="danger-action" data-delete-goal="${index}" type="button">Apagar</button>
@@ -1346,22 +1383,57 @@ function playerPower(playerId) {
   let goals = 0;
   let assists = 0;
   let wins = 0;
+  let ownGoals = 0;
   let ratingSum = 0;
-  let ratingCount = 0;
-  sessions.forEach((session) => {
+  let weightSum = 0;
+  sessions.slice(-6).forEach((session, index, recentSessions) => {
+    const weight = 1 + (index / Math.max(1, recentSessions.length - 1)) * 2;
     (session.stats || []).forEach((item) => {
       if (item.id !== playerId && item.playerId !== playerId) return;
-      goals += Number(item.goals) || 0;
-      assists += Number(item.assists) || 0;
-      wins += Number(item.wins) || 0;
+      goals += (Number(item.goals) || 0) * weight;
+      assists += (Number(item.assists) || 0) * weight;
+      wins += (Number(item.wins) || 0) * weight;
+      ownGoals += (Number(item.ownGoals) || 0) * weight;
       if (item.rating) {
-        ratingSum += Number(item.rating) || 0;
-        ratingCount += 1;
+        ratingSum += (Number(item.rating) || 0) * weight;
+        weightSum += weight;
       }
     });
   });
-  const rating = ratingCount ? ratingSum / ratingCount : 3;
-  return calculatePerformanceScore({ goals, assists, wins }, rating);
+  const rating = weightSum ? ratingSum / weightSum : 3;
+  return calculatePerformanceScore({ goals, assists, wins, ownGoals }, rating);
+}
+
+function playerSummary(playerId) {
+  const total = { goals: 0, assists: 0, wins: 0, ownGoals: 0, ratingSum: 0, ratingCount: 0, sessions: 0 };
+  (profile.sessions || []).forEach((session) => {
+    (session.stats || []).forEach((item) => {
+      if (item.id !== playerId && item.playerId !== playerId) return;
+      total.goals += Number(item.goals) || 0;
+      total.assists += Number(item.assists) || 0;
+      total.wins += Number(item.wins) || 0;
+      total.ownGoals += Number(item.ownGoals) || 0;
+      total.sessions += 1;
+      if (item.rating) {
+        total.ratingSum += Number(item.rating) || 0;
+        total.ratingCount += 1;
+      }
+    });
+  });
+  return {
+    ...total,
+    rating: total.ratingCount ? (total.ratingSum / total.ratingCount).toFixed(1) : "3.0"
+  };
+}
+
+function playerBadges(stats) {
+  const badges = [];
+  if (stats.goals >= 10) badges.push("Artilheiro");
+  if (stats.assists >= 10) badges.push("Garcom");
+  if (stats.wins >= 10) badges.push("Pe quente");
+  if (Number(stats.rating) >= 4.5 && stats.ratingCount >= 2) badges.push("5 estrelas");
+  if (stats.goals >= 3) badges.push("Hat-trick");
+  return badges;
 }
 
 function startMatch(playing, bench) {
@@ -1400,19 +1472,31 @@ function registerGoal(event) {
   const teamKey = els.goalTeam.value;
   const scorer = els.goalPlayer.value;
   const assistant = els.assistPlayer.value;
-  if (!teamKey || !scorer || !assistant || assistant === scorer) {
+  const ownGoal = els.ownGoal.checked;
+  if (!teamKey || !scorer || (!ownGoal && (!assistant || assistant === scorer))) {
     alert("Escolha quem fez o gol e quem deu a assistencia. A assistencia e obrigatoria.");
     return;
   }
+  const message = ownGoal
+    ? `Confirmar gol contra de ${playerDisplayName(scorer)} para o time ${teamName(teamKey)}?`
+    : `Confirmar gol de ${playerDisplayName(scorer)}, assistencia de ${playerDisplayName(assistant)}, para o time ${teamName(teamKey)}?`;
+  if (!confirm(message)) return;
 
-  ensurePlayerStats(teamKey, scorer).goals += 1;
-  ensurePlayerStats(teamKey, assistant).assists += 1;
+  if (ownGoal) {
+    const scorerTeam = activeTeamKeys().find((key) => key !== teamKey);
+    const stat = ensurePlayerStats(scorerTeam, scorer);
+    stat.ownGoals = (stat.ownGoals || 0) + 1;
+  } else {
+    ensurePlayerStats(teamKey, scorer).goals += 1;
+    ensurePlayerStats(teamKey, assistant).assists += 1;
+  }
 
   draft.currentMatch.score[teamKey] += 1;
   draft.currentMatch.goals.push({
     teamKey,
     scorer,
-    assistant,
+    assistant: ownGoal ? "" : assistant,
+    ownGoal,
     at: matchDurationSeconds(draft.currentMatch) - draft.currentMatch.remaining
   });
   celebrateGoal(teamKey);
@@ -1436,9 +1520,13 @@ function removeGoalAt(index) {
   const [goal] = match.goals.splice(index, 1);
   match.score[goal.teamKey] = Math.max(0, (match.score[goal.teamKey] || 0) - 1);
   const scorerStat = draft.playerStats[playerStatId(goal.scorer)];
-  if (scorerStat) scorerStat.goals = Math.max(0, (scorerStat.goals || 0) - 1);
-  const assistantStat = draft.playerStats[playerStatId(goal.assistant)];
-  if (assistantStat) assistantStat.assists = Math.max(0, (assistantStat.assists || 0) - 1);
+  if (goal.ownGoal) {
+    if (scorerStat) scorerStat.ownGoals = Math.max(0, (scorerStat.ownGoals || 0) - 1);
+  } else {
+    if (scorerStat) scorerStat.goals = Math.max(0, (scorerStat.goals || 0) - 1);
+    const assistantStat = draft.playerStats[playerStatId(goal.assistant)];
+    if (assistantStat) assistantStat.assists = Math.max(0, (assistantStat.assists || 0) - 1);
+  }
   render();
   return goal;
 }
@@ -1447,6 +1535,7 @@ function editGoalAt(index) {
   const goal = removeGoalAt(index);
   if (!goal) return;
   els.goalTeam.value = goal.teamKey;
+  els.ownGoal.checked = Boolean(goal.ownGoal);
   fillPlayerOptions();
   els.goalPlayer.value = goal.scorer;
   fillPlayerOptions();
@@ -1524,7 +1613,8 @@ function renderRatingView() {
     .sort((a, b) => a.name.localeCompare(b.name));
   els.finalView.innerHTML = `
     <p class="eyebrow">Notas da pelada</p>
-    <h2>Avalie cada jogador</h2>
+    <h2>Revise e avalie cada jogador</h2>
+    ${renderSessionReview()}
     <p>Use notas de 1 a 5 para ajustar a forca do jogador ao longo do tempo. Isso ajuda o sistema a criar uma nota mais justa.</p>
     <form id="ratingForm" class="rating-form">
       ${players.map((item) => `
@@ -1538,9 +1628,26 @@ function renderRatingView() {
         </label>
       `).join("")}
       <div class="next-actions">
+        <button class="secondary-action" id="backToLastMatch" type="button">Voltar para corrigir</button>
         <button class="primary-action big" type="submit">Salvar notas e finalizar</button>
       </div>
     </form>
+  `;
+}
+
+function renderSessionReview() {
+  const matches = draft.completedMatches || [];
+  return `
+    <section class="review-panel">
+      <h3>Revisao antes de salvar</h3>
+      <div class="data-list">
+        ${matches.map((match, index) => {
+          const score = match.playing.map((key) => `${teamName(key)} ${match.score[key]}`).join(" x ");
+          const result = match.winner ? `Vencedor: ${teamName(match.winner)}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : `Rei da mesa: ${teamName(match.stayTeam)}`;
+          return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${result}</span></div>`;
+        }).join("") || "<p>Nenhuma partida registrada.</p>"}
+      </div>
+    </section>
   `;
 }
 
@@ -1555,6 +1662,16 @@ function completeSessionRatings(event) {
   profile.sessions.push(summary);
   draft.finalSummary = summary;
   draft.mode = "final";
+  saveStore();
+  render();
+}
+
+function reopenLastFinishedMatch() {
+  if (draft.mode !== "rating" || !draft.completedMatches.length) return;
+  const match = draft.completedMatches.pop();
+  draft.finishedMatch = { ...match, stored: false };
+  draft.currentMatch = null;
+  draft.mode = "ended";
   saveStore();
   render();
 }
@@ -1623,7 +1740,8 @@ function calculatePerformanceScore(item, rating = 3) {
   return ((Number(item.goals) || 0) * 3)
     + ((Number(item.assists) || 0) * 2)
     + ((Number(item.wins) || 0) * 1.5)
-    + ((Number(rating) || 3) * 2);
+    + ((Number(rating) || 3) * 2)
+    - ((Number(item.ownGoals) || 0) * 1);
 }
 
 function buildReport(summary) {
@@ -2245,6 +2363,56 @@ function switchSeason() {
   render();
 }
 
+function downloadTextFile(filename, content, type = "text/plain") {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function exportCsv() {
+  const sessions = filteredSessions(activeDataTab);
+  const rows = [["Data", "Temporada", "Jogador", "Gols", "Assistencias", "Vitorias", "Gol contra", "Nota", "Nota PeladaFast"]];
+  sessions.forEach((session) => {
+    (session.stats || []).forEach((item) => {
+      rows.push([
+        new Date(session.date).toLocaleString("pt-BR"),
+        session.seasonName || "",
+        item.name,
+        item.goals || 0,
+        item.assists || 0,
+        item.wins || 0,
+        item.ownGoals || 0,
+        item.rating || "",
+        item.performanceScore || ""
+      ]);
+    });
+  });
+  const csv = rows.map((row) => row.map((cell) => `"${String(cell).replaceAll('"', '""')}"`).join(",")).join("\n");
+  downloadTextFile(`peladafast-${activeDataTab}.csv`, csv, "text/csv;charset=utf-8");
+}
+
+function exportBackup() {
+  downloadTextFile(`peladafast-backup-${profile.username}.json`, JSON.stringify(profile, null, 2), "application/json");
+}
+
+async function importBackup(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!confirm("Restaurar este backup neste perfil? Isso substitui os dados atuais deste navegador.")) return;
+  const text = await file.text();
+  const imported = ensureProfileDefaults(JSON.parse(text));
+  Object.assign(profile, imported, { id: profile.id, username: profile.username, email: profile.email, phone: profile.phone, peladaName: profile.peladaName });
+  draft = profile.draft || newDraft();
+  saveStore();
+  render();
+  renderData();
+  event.target.value = "";
+}
+
 function togglePassword(event) {
   const wrapper = event.target.closest(".password-wrap");
   const input = wrapper?.querySelector("input");
@@ -2383,8 +2551,10 @@ els.lineupCheck.addEventListener("click", (event) => {
 els.drawMatch.addEventListener("click", startFirstMatch);
 els.balanceTeams.addEventListener("click", balanceTeamsByPerformance);
 els.startCountdown.addEventListener("click", startCountdown);
+els.fullScoreMode.addEventListener("click", toggleFullScoreMode);
 els.endTimedMatch.addEventListener("click", () => finishCurrentMatch("time"));
 els.goalTeam.addEventListener("change", fillPlayerOptions);
+els.ownGoal.addEventListener("change", fillPlayerOptions);
 els.goalPlayer.addEventListener("change", fillPlayerOptions);
 els.goalForm.addEventListener("submit", registerGoal);
 els.undoLastGoal.addEventListener("click", undoLastGoal);
@@ -2414,10 +2584,16 @@ els.finalView.addEventListener("input", (event) => {
   const output = input.closest(".rating-row")?.querySelector("output");
   if (output) output.textContent = input.value;
 });
+els.finalView.addEventListener("click", (event) => {
+  if (event.target.closest("#backToLastMatch")) reopenLastFinishedMatch();
+});
 els.finalView.addEventListener("submit", (event) => {
   if (event.target.matches("#ratingForm")) completeSessionRatings(event);
 });
 els.newSession.addEventListener("click", resetDraft);
+els.exportCsv.addEventListener("click", exportCsv);
+els.exportBackup.addEventListener("click", exportBackup);
+els.importBackup.addEventListener("change", importBackup);
 els.publishShare.addEventListener("click", publishSharePage);
 els.shareGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-copy-share]");

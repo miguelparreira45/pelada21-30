@@ -137,6 +137,7 @@
               <div class="timer" id="timer">07:00</div>
               <p class="rule" id="matchRule">2 gols ou 7 minutos</p>
               <button class="primary-action timer-action" id="startCountdown">Iniciar contagem</button>
+              <button class="secondary-action timer-action" id="fullScoreMode">Placar cheio</button>
               <button class="secondary-action timer-action hidden" id="endTimedMatch">Encerrar partida</button>
             </div>
             <article class="team-panel" id="rightPanel"></article>
@@ -154,6 +155,10 @@
               </div>
               <form id="goalForm" class="goal-form">
                 <label>Time do gol<select id="goalTeam"></select></label>
+                <label class="own-goal-toggle">
+                  <input id="ownGoal" type="checkbox">
+                  Gol contra
+                </label>
                 <label>Gol de<select id="goalPlayer"></select></label>
                 <label>Assistencia<select id="assistPlayer"></select></label>
                 <button class="primary-action" type="submit">Marcar gol</button>
@@ -225,6 +230,9 @@
             <h2>Historico da pelada</h2>
           </div>
           <button class="secondary-action" id="newSession">Nova pelada</button>
+          <button class="secondary-action" id="exportCsv">Exportar planilha</button>
+          <button class="secondary-action" id="exportBackup">Backup</button>
+          <label class="secondary-action import-backup">Restaurar<input id="importBackup" type="file" accept="application/json"></label>
         </div>
         <div class="data-tabs">
           <button class="tab-button active" data-data-tab="today">Peladas de hoje</button>

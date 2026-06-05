@@ -182,6 +182,15 @@ button {
   border: 1px solid var(--line);
 }
 
+.import-backup {
+  display: inline-grid;
+  place-items: center;
+}
+
+.import-backup input {
+  display: none;
+}
+
 .danger-action {
   min-height: 44px;
   padding: 0 16px;
@@ -420,6 +429,28 @@ p {
   background: #0b0f0b;
 }
 
+.player-metrics,
+.badge-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 8px;
+}
+
+.player-metrics small {
+  padding: 4px 7px;
+  border-radius: 8px;
+  background: #151915;
+  color: var(--ink);
+  font-weight: 900;
+}
+
+.mini-pill.trophy {
+  color: #071006;
+  background: var(--green);
+  border-color: var(--green);
+}
+
 .registered-player strong,
 .player-pill.mensalista span,
 .mini-pill.mensalista {
@@ -644,6 +675,24 @@ p {
   align-items: end;
 }
 
+.own-goal-toggle {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+  color: var(--ink);
+}
+
+.own-goal-toggle input {
+  width: 18px;
+  min-height: 18px;
+}
+
 .match-timeline {
   margin-top: 16px;
 }
@@ -721,6 +770,36 @@ p {
   color: #071006;
   background: var(--green);
   font-weight: 950;
+}
+
+.review-panel {
+  margin: 14px 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.match-view.full-score .lineup-check,
+.match-view.full-score .bench-strip,
+.match-view.full-score .match-tools {
+  display: none;
+}
+
+.match-view.full-score .scoreboard {
+  min-height: calc(100vh - 160px);
+  align-items: stretch;
+}
+
+.match-view.full-score .team-panel,
+.match-view.full-score .timer-panel {
+  display: grid;
+  place-items: center;
+  text-align: center;
+}
+
+.match-view.full-score .score {
+  font-size: clamp(96px, 18vw, 220px);
 }
 
 .stat-row,
