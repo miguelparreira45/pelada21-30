@@ -1297,3 +1297,246 @@ p {
     flex: 1;
   }
 }
+
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+
+  .auth-shell,
+  .app-shell,
+  .public-shell {
+    width: min(100% - 18px, 1200px);
+    padding: 10px 0 26px;
+  }
+
+  .auth-shell {
+    gap: 12px;
+    align-items: start;
+  }
+
+  .brand-stage {
+    min-height: auto;
+    padding: 20px 16px;
+    gap: 12px;
+  }
+
+  .brand-logo {
+    width: min(330px, 92vw);
+  }
+
+  .brand-stage h1 {
+    max-width: 420px;
+    margin: 0;
+    font-size: clamp(28px, 10vw, 42px);
+  }
+
+  .commercial-link {
+    min-height: 42px;
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .auth-panel,
+  .option-card,
+  .team-card,
+  .lineup-check,
+  .data-card,
+  .tool-panel,
+  .team-panel,
+  .timer-panel,
+  .result-band,
+  .winner-choice,
+  .final-view {
+    padding: 12px;
+  }
+
+  .auth-tabs,
+  .data-tabs,
+  .main-nav {
+    gap: 7px;
+  }
+
+  .tab-button,
+  .primary-action,
+  .secondary-action,
+  .danger-action,
+  .icon-button {
+    min-height: 38px;
+    padding-inline: 10px;
+    font-size: 13px;
+  }
+
+  input,
+  select,
+  textarea {
+    min-height: 40px;
+    padding: 9px 10px;
+    font-size: 14px;
+  }
+
+  label {
+    font-size: 12px;
+  }
+
+  .app-header {
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+
+  .app-brand {
+    justify-content: flex-start;
+    gap: 10px;
+  }
+
+  .app-brand img {
+    width: 126px;
+  }
+
+  .sync-badge {
+    margin-top: 5px;
+    padding: 4px 7px;
+    font-size: 11px;
+  }
+
+  h1 {
+    font-size: clamp(24px, 8vw, 34px);
+  }
+
+  h2 {
+    font-size: 19px;
+  }
+
+  h3 {
+    font-size: 16px;
+  }
+
+  .setup-view,
+  .match-view,
+  .ended-view,
+  .data-tab,
+  .players-tab,
+  .share-tab,
+  .public-shell {
+    gap: 12px;
+  }
+
+  .setup-options,
+  .teams-grid,
+  .match-tools,
+  .data-grid,
+  .lineup-grid {
+    gap: 10px;
+  }
+
+  .team-card {
+    border-top-width: 5px;
+  }
+
+  .player-list {
+    min-height: 72px;
+  }
+
+  .player-pill {
+    min-height: 36px;
+    padding: 7px 8px;
+  }
+
+  .player-avatar {
+    width: 32px;
+    height: 32px;
+  }
+
+  .scoreboard {
+    gap: 10px;
+  }
+
+  .score {
+    font-size: clamp(48px, 18vw, 72px);
+  }
+
+  .timer {
+    font-size: clamp(38px, 15vw, 58px);
+  }
+
+  .players-mini {
+    margin-top: 10px;
+    gap: 5px;
+  }
+
+  .mini-pill {
+    padding: 5px 7px;
+    font-size: 12px;
+  }
+
+  .bench-strip,
+  .match-history-live,
+  .review-panel {
+    padding: 10px;
+  }
+
+  .complete-form,
+  .goal-form,
+  .modal-card .goal-form {
+    grid-template-columns: 1fr;
+    gap: 9px;
+  }
+
+  .modal-backdrop {
+    padding: 10px;
+  }
+
+  .modal-card {
+    max-height: calc(100vh - 20px);
+    overflow: auto;
+    padding: 12px;
+  }
+
+  .rating-row {
+    gap: 9px;
+    padding: 10px;
+  }
+
+  .leader-grid {
+    gap: 8px;
+  }
+
+  .leader-box {
+    padding: 10px;
+  }
+
+  .leader-box strong {
+    font-size: 18px;
+  }
+
+  .chart-card,
+  .season-awards {
+    padding: 10px;
+  }
+
+  .ranking-row {
+    gap: 7px;
+    padding: 7px;
+    font-size: 12px;
+  }
+
+  .podium-card {
+    padding: 16px;
+  }
+
+  .podium-card img {
+    width: min(220px, 78%);
+  }
+
+  .podium-card h2 {
+    font-size: clamp(26px, 10vw, 42px);
+  }
+
+  .match-view.full-score .scoreboard {
+    min-height: calc(100vh - 72px);
+  }
+
+  .match-view.full-score .score {
+    font-size: clamp(82px, 26vw, 138px);
+  }
+}
