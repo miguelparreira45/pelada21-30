@@ -71,6 +71,7 @@ const els = {
   leftPanel: document.querySelector("#leftPanel"),
   rightPanel: document.querySelector("#rightPanel"),
   lineupCheck: document.querySelector("#lineupCheck"),
+  matchHistoryLive: document.querySelector("#matchHistoryLive"),
   timer: document.querySelector("#timer"),
   startCountdown: document.querySelector("#startCountdown"),
   fullScoreMode: document.querySelector("#fullScoreMode"),
@@ -79,6 +80,11 @@ const els = {
   matchLabel: document.querySelector("#matchLabel"),
   benchStrip: document.querySelector("#benchStrip"),
   goalForm: document.querySelector("#goalForm"),
+  goalFormHome: document.querySelector("#goalFormHome"),
+  goalPopup: document.querySelector("#goalPopup"),
+  goalPopupSlot: document.querySelector("#goalPopupSlot"),
+  goalPopupTitle: document.querySelector("#goalPopupTitle"),
+  closeGoalPopup: document.querySelector("#closeGoalPopup"),
   goalTeam: document.querySelector("#goalTeam"),
   ownGoal: document.querySelector("#ownGoal"),
   goalPlayer: document.querySelector("#goalPlayer"),
@@ -569,7 +575,8 @@ function benchTeamKey() {
 function matchRoster(teamKey, match = draft.currentMatch || draft.finishedMatch) {
   const base = draft.teams?.[teamKey]?.players || match?.teams?.[teamKey]?.players || [];
   const guests = match?.guests?.[teamKey] || [];
-  return [...new Set([...base, ...guests])];
+  const out = new Set(match?.out?.[teamKey] || []);
+  return [...new Set([...base, ...guests])].filter((ref) => !out.has(ref));
 }
 
 function baseTeamOfPlayer(ref) {
@@ -858,6 +865,7 @@ function render() {
   clearInterval(timerId);
   timerId = null;
   if (!profile || !draft) return;
+  if (draft.mode !== "match") els.appShell.classList.remove("full-score-active");
 
   els.setupView.classList.toggle("hidden", draft.mode !== "setup");
   els.matchView.classList.toggle("hidden", draft.mode !== "match");
@@ -1048,6 +1056,8 @@ function editPlayerProfile(playerId) {
   els.playerProfileForm.elements.lastName.value = player.lastName;
   els.playerProfileForm.elements.memberType.value = player.memberType;
   renderPlayers();
+  els.playerProfileForm.scrollIntoView({ behavior: "smooth", block: "center" });
+  els.playerProfileForm.elements.firstName.focus();
 }
 
 function deletePlayerProfile(playerId) {
@@ -1088,9 +1098,12 @@ function renderMatch() {
   els.timer.textContent = formatClock(match.remaining);
   els.matchRule.textContent = `${match.goalLimit} gol${match.goalLimit === 1 ? "" : "s"} ou ${match.durationMinutes} minuto${match.durationMinutes === 1 ? "" : "s"}`;
   els.fullScoreMode.textContent = els.matchView.classList.contains("full-score") ? "Sair do placar cheio" : "Placar cheio";
+  els.appShell.classList.toggle("full-score-active", els.matchView.classList.contains("full-score"));
   els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
   els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
   renderLineupCheck();
+  els.matchHistoryLive.innerHTML = renderMatchHistoryPreview();
+  els.matchHistoryLive.classList.toggle("hidden", !draft.completedMatches.length);
   renderBench();
   renderGoalForm();
   renderStats();
@@ -1111,9 +1124,25 @@ function renderTeamPanel(teamKey) {
   }).join("");
   return `
     <p class="eyebrow">Time ${meta.name}</p>
+    <button class="primary-action quick-goal" data-quick-goal="${teamKey}" type="button">+1 gol</button>
     <div class="score" data-score-team="${teamKey}">${score}</div>
     <div class="players-mini">${players}</div>
   `;
+}
+
+function openGoalPopup(teamKey) {
+  if (!draft.currentMatch) return;
+  els.goalTeam.value = teamKey;
+  els.ownGoal.checked = false;
+  fillPlayerOptions();
+  els.goalPopupTitle.textContent = `Gol para ${teamName(teamKey)}`;
+  els.goalPopupSlot.appendChild(els.goalForm);
+  els.goalPopup.classList.remove("hidden");
+}
+
+function closeGoalPopup() {
+  els.goalFormHome.before(els.goalForm);
+  els.goalPopup.classList.add("hidden");
 }
 
 function renderLineupCheck() {
@@ -1138,6 +1167,8 @@ function renderLineupCheck() {
 function renderLineupTeam(teamKey) {
   const base = draft.teams[teamKey].players;
   const guests = draft.currentMatch.guests[teamKey] || [];
+  const out = draft.currentMatch.out?.[teamKey] || [];
+  const currentRoster = matchRoster(teamKey);
   const options = availableGuestPlayers(teamKey);
   return `
     <article class="lineup-card" style="--team-color: ${teamColor(teamKey)}">
@@ -1150,8 +1181,19 @@ function renderLineupTeam(teamKey) {
             <button type="button" data-remove-guest="${ref}" data-team="${teamKey}">x</button>
           </span>
         `).join("")}
+        ${out.map((ref) => `
+          <span class="mini-pill out">
+            ${escapeHtml(playerDisplayName(ref))} saiu
+            <button type="button" data-return-out="${ref}" data-team="${teamKey}">x</button>
+          </span>
+        `).join("")}
       </div>
       <form class="complete-form" data-complete-team="${teamKey}">
+        <label>Quem sai
+          <select name="outgoing" ${currentRoster.length ? "" : "disabled"}>
+            ${currentRoster.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")}
+          </select>
+        </label>
         <label>Completar elenco
           <select name="guest" ${options.length ? "" : "disabled"}>
             ${options.length ? `<option value="">Escolha jogador</option>` + options.map((player) => {
@@ -1179,10 +1221,10 @@ function renderGoalForm() {
   const canRegisterGoal = Boolean(draft.currentMatch?.isRunning || draft.currentMatch?.isTimeUp);
   els.goalTeam.innerHTML = active.map((key) => `<option value="${key}">${teamName(key)}</option>`).join("");
   if (!active.includes(els.goalTeam.value)) els.goalTeam.value = active[0];
-  fillPlayerOptions();
   els.goalForm.querySelectorAll("select, button[type='submit']").forEach((field) => {
     field.disabled = !canRegisterGoal;
   });
+  fillPlayerOptions();
   updateGoalFormState();
   els.undoLastGoal.disabled = !draft.currentMatch?.goals?.length;
 }
@@ -1204,6 +1246,7 @@ function fillPlayerOptions() {
     ? `<option value="">Escolha a assistencia</option>` + assistOptions.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")
     : `<option value="">Sem outro jogador no time</option>`;
   if (!ownGoal && assistOptions.includes(previousAssistant)) els.assistPlayer.value = previousAssistant;
+  if (!ownGoal && !els.assistPlayer.value && assistOptions.length) els.assistPlayer.value = assistOptions[0];
   els.assistPlayer.disabled = ownGoal || !assistOptions.length;
   updateGoalFormState();
 }
@@ -1284,6 +1327,7 @@ function renderEnded() {
     <p class="eyebrow">Partida ${draft.matchNumber} encerrada</p>
     <h2>${scoreLine}</h2>
     <p>${winner ? `Vencedor: ${winner}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : king ? `Rei da mesa: ${king} permanece em campo sem contar vitoria.` : "Empate no tempo. Escolha rei da mesa ou defina um vencedor."}</p>
+    ${renderMatchHistoryPreview(match)}
   `;
 
   const needsResolution = !match.winner && !match.kingTable;
@@ -1308,6 +1352,22 @@ function renderEnded() {
   } else {
     els.winnerChoice.innerHTML = "";
   }
+}
+
+function renderMatchHistoryPreview(extraMatch = null) {
+  const matches = [...(draft.completedMatches || [])];
+  if (extraMatch && !extraMatch.stored) matches.push(extraMatch);
+  if (!matches.length) return "";
+  return `
+    <div class="match-history-preview">
+      <h3>Historico da pelada</h3>
+      ${matches.map((item, index) => {
+        const score = item.playing.map((key) => `${teamName(key, item)} ${item.score[key]}`).join(" x ");
+        const result = item.winner ? `Vencedor: ${teamName(item.winner, item)}` : `Rei da mesa: ${teamName(item.stayTeam, item)}`;
+        return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${result}</span></div>`;
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderFinalSummary() {
@@ -1446,6 +1506,7 @@ function startMatch(playing, bench) {
     enteredTeam: playing[1],
     score: { [playing[0]]: 0, [playing[1]]: 0 },
     guests: { [playing[0]]: [], [playing[1]]: [] },
+    out: { [playing[0]]: [], [playing[1]]: [] },
     goals: [],
     remaining: durationMinutes * 60,
     durationMinutes,
@@ -1501,9 +1562,14 @@ function registerGoal(event) {
   });
   celebrateGoal(teamKey);
 
-  if (draft.currentMatch.score[teamKey] >= draft.currentMatch.goalLimit) {
+  if (draft.currentMatch.overtimeResolution) {
+    finishCurrentMatch("overtime-goal", teamKey);
+    closeGoalPopup();
+  } else if (draft.currentMatch.score[teamKey] >= draft.currentMatch.goalLimit) {
     finishCurrentMatch("goals", teamKey);
+    closeGoalPopup();
   } else {
+    closeGoalPopup();
     render();
   }
 }
@@ -1561,10 +1627,28 @@ function finishCurrentMatch(reason, forcedWinner = null) {
 }
 
 function chooseWinner(teamKey) {
+  const hasOvertimeGoal = Boolean(document.querySelector("#overtimeGoalChoice")?.checked);
+  if (hasOvertimeGoal) {
+    draft.currentMatch = {
+      ...draft.finishedMatch,
+      winner: null,
+      kingTable: false,
+      stayTeam: "",
+      overtimeGoal: true,
+      overtimeResolution: true,
+      isRunning: false,
+      isTimeUp: true
+    };
+    draft.finishedMatch = null;
+    draft.mode = "match";
+    render();
+    openGoalPopup(teamKey);
+    return;
+  }
   draft.finishedMatch.winner = teamKey;
   draft.finishedMatch.kingTable = false;
   draft.finishedMatch.stayTeam = "";
-  draft.finishedMatch.overtimeGoal = Boolean(document.querySelector("#overtimeGoalChoice")?.checked);
+  draft.finishedMatch.overtimeGoal = false;
   render();
 }
 
@@ -2531,8 +2615,15 @@ els.lineupCheck.addEventListener("submit", (event) => {
   event.preventDefault();
   const teamKey = form.dataset.completeTeam;
   const ref = form.elements.guest.value;
-  if (!ref) return;
+  const outgoing = form.elements.outgoing.value;
+  if (!ref || !outgoing || ref === outgoing) return;
   draft.currentMatch.guests[teamKey] ||= [];
+  draft.currentMatch.out ||= {};
+  draft.currentMatch.out[teamKey] ||= [];
+  if (!draft.currentMatch.out[teamKey].includes(outgoing)) {
+    draft.currentMatch.out[teamKey].push(outgoing);
+  }
+  draft.currentMatch.guests[teamKey] = draft.currentMatch.guests[teamKey].filter((item) => item !== outgoing);
   if (!draft.currentMatch.guests[teamKey].includes(ref)) {
     draft.currentMatch.guests[teamKey].push(ref);
   }
@@ -2548,6 +2639,15 @@ els.lineupCheck.addEventListener("click", (event) => {
   render();
 });
 
+els.lineupCheck.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-return-out]");
+  if (!button || !draft.currentMatch) return;
+  const teamKey = button.dataset.team;
+  const ref = button.dataset.returnOut;
+  draft.currentMatch.out[teamKey] = (draft.currentMatch.out[teamKey] || []).filter((item) => item !== ref);
+  render();
+});
+
 els.drawMatch.addEventListener("click", startFirstMatch);
 els.balanceTeams.addEventListener("click", balanceTeamsByPerformance);
 els.startCountdown.addEventListener("click", startCountdown);
@@ -2558,6 +2658,18 @@ els.ownGoal.addEventListener("change", fillPlayerOptions);
 els.goalPlayer.addEventListener("change", fillPlayerOptions);
 els.goalForm.addEventListener("submit", registerGoal);
 els.undoLastGoal.addEventListener("click", undoLastGoal);
+els.leftPanel.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-quick-goal]");
+  if (button) openGoalPopup(button.dataset.quickGoal);
+});
+els.rightPanel.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-quick-goal]");
+  if (button) openGoalPopup(button.dataset.quickGoal);
+});
+els.closeGoalPopup.addEventListener("click", closeGoalPopup);
+els.goalPopup.addEventListener("click", (event) => {
+  if (event.target === els.goalPopup) closeGoalPopup();
+});
 els.matchTimeline.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-goal]");
   if (editButton) {

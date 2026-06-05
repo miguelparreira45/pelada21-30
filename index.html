@@ -145,6 +145,8 @@
 
           <section class="lineup-check" id="lineupCheck"></section>
 
+          <section class="match-history-live" id="matchHistoryLive"></section>
+
           <div class="bench-strip" id="benchStrip"></div>
 
           <div class="match-tools">
@@ -164,6 +166,7 @@
                 <button class="primary-action" type="submit">Marcar gol</button>
                 <button class="secondary-action" id="undoLastGoal" type="button">Desfazer ultimo gol</button>
               </form>
+              <div id="goalFormHome"></div>
             </section>
 
             <section class="tool-panel">
@@ -267,6 +270,19 @@
       </header>
       <section class="data-grid" id="publicGrid"></section>
     </main>
+
+    <div class="modal-backdrop hidden" id="goalPopup">
+      <section class="modal-card">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Registrar lance</p>
+            <h2 id="goalPopupTitle">Novo gol</h2>
+          </div>
+          <button class="secondary-action" id="closeGoalPopup" type="button">Fechar</button>
+        </div>
+        <div id="goalPopupSlot"></div>
+      </section>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="supabase-config.js"></script>

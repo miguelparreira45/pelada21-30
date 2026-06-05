@@ -536,6 +536,11 @@ p {
   border-top: 7px solid var(--team-color);
 }
 
+.quick-goal {
+  width: 100%;
+  margin: 8px 0 12px;
+}
+
 .score {
   font-size: clamp(58px, 10vw, 106px);
   line-height: .92;
@@ -653,6 +658,12 @@ p {
   box-shadow: 0 0 0 1px rgba(155, 227, 29, .14);
 }
 
+.mini-pill.out {
+  color: #ffb4b4;
+  border-color: #633034;
+  background: #271112;
+}
+
 .mini-pill button {
   margin-left: 6px;
   border: 0;
@@ -663,7 +674,7 @@ p {
 
 .complete-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
   gap: 10px;
   align-items: end;
 }
@@ -780,9 +791,50 @@ p {
   background: #0b0f0b;
 }
 
+.match-history-preview {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(0, 0, 0, .72);
+}
+
+.modal-card {
+  width: min(860px, 100%);
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+.modal-card .goal-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .match-view.full-score .lineup-check,
+.match-view.full-score .match-history-live,
 .match-view.full-score .bench-strip,
 .match-view.full-score .match-tools {
+  display: none;
+}
+
+.match-history-live {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.app-shell.full-score-active .app-header {
   display: none;
 }
 
