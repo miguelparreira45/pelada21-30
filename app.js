@@ -1894,7 +1894,7 @@ function renderData() {
         <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
         <div class="leader-box"><span>Assistencias</span><strong>${escapeHtml(ranking.topAssistant.label)}</strong></div>
         <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(ranking.topHot.label)}</strong></div>
-        <div class="leader-box"><span>Nota PeladaFast</span><strong>${escapeHtml(ranking.topMvp.label)}</strong></div>
+      <div class="leader-box"><span>Nota PeladaFast ${renderInfoHint()}</span><strong>${escapeHtml(ranking.topMvp.label)}</strong></div>
       </div>
     </section>
     <section class="data-card">
@@ -2162,12 +2162,30 @@ async function loadPublicShare(slug) {
 function renderCharts(sessions) {
   const stats = buildOverallStats(sessions);
   return `
-    <div class="charts-grid">
-      ${renderChart("Disputa pela artilharia", stats, "goals")}
-      ${renderChart("Disputa por assistencias", stats, "assists")}
-      ${renderChart("Disputa pe quente", stats, "wins")}
-      ${renderChart("Nota PeladaFast", stats, "performanceScore")}
+    <div class="charts-accordion">
+      ${renderChartDrawer("Disputa pela artilharia", stats, "goals", true)}
+      ${renderChartDrawer("Disputa por assistencias", stats, "assists")}
+      ${renderChartDrawer("Disputa pe quente", stats, "wins")}
+      ${renderChartDrawer(`Nota PeladaFast ${renderInfoHint()}`, stats, "performanceScore")}
     </div>
+  `;
+}
+
+function renderInfoHint() {
+  return `
+    <button class="info-button" type="button" aria-label="Como funciona a Nota PeladaFast">i</button>
+    <span class="info-popover">
+      A Nota PeladaFast soma desempenho e avaliacao: gol vale 3 pontos, assistencia vale 2, vitoria vale 1,5, sua nota de 1 a 5 vale o dobro, e gol contra tira 1 ponto. As ultimas peladas pesam mais no sorteio equilibrado.
+    </span>
+  `;
+}
+
+function renderChartDrawer(title, stats, field, open = false) {
+  return `
+    <details class="chart-drawer" ${open ? "open" : ""}>
+      <summary>${title}</summary>
+      ${renderChart("", stats, field)}
+    </details>
   `;
 }
 
@@ -2178,11 +2196,11 @@ function renderChart(title, stats, field) {
     .slice(0, 10);
   const max = Math.max(1, ...ordered.map((item) => item[field]));
   if (!ordered.length) {
-    return `<div class="chart-card"><h4>${title}</h4><p>Sem dados ainda.</p></div>`;
+    return `<div class="chart-card">${title ? `<h4>${title}</h4>` : ""}<p>Sem dados ainda.</p></div>`;
   }
   return `
     <div class="chart-card">
-      <h4>${title}</h4>
+      ${title ? `<h4>${title}</h4>` : ""}
       ${ordered.map((item) => `
         <div class="bar-row">
           <span>${escapeHtml(item.name)}</span>
@@ -2498,11 +2516,10 @@ function exportPodiumImage() {
   drawPodiumLine(ctx, "Equipe campea", summary.winnerTeam.label, 78, 390);
   drawPodiumLine(ctx, "Artilheiro", summary.topScorer.label, 78, 555);
   drawPodiumLine(ctx, "Maior assistente", summary.topAssistant.label, 78, 720);
-  drawPodiumLine(ctx, "Pe quente", summary.topHot.label, 78, 885);
-  drawPodiumLine(ctx, "Destaque", summary.topMvp?.label || "Sem destaque", 78, 1050);
+  drawPodiumLine(ctx, "Destaque", summary.topMvp?.label || "Sem destaque", 78, 885);
   ctx.fillStyle = "#9aa393";
   ctx.font = "700 28px Arial";
-  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 78, 1260);
+  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 78, 1190);
   const link = document.createElement("a");
   link.download = `peladafast-podio-${Date.now()}.png`;
   link.href = canvas.toDataURL("image/png");
