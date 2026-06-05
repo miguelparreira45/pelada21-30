@@ -791,6 +791,24 @@ p {
   background: #0b0f0b;
 }
 
+.podium-card {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid rgba(155, 227, 29, .65);
+  border-radius: 8px;
+  background: linear-gradient(145deg, rgba(155, 227, 29, .15), rgba(255,255,255,.025)), #0b0f0b;
+  box-shadow: var(--shadow);
+}
+
+.podium-card img {
+  width: min(260px, 70%);
+}
+
+.podium-card h2 {
+  font-size: clamp(34px, 6vw, 68px);
+}
+
 .match-history-preview {
   margin-top: 18px;
   padding-top: 12px;
