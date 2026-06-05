@@ -93,6 +93,12 @@ a {
   animation: riseIn .6s ease both;
 }
 
+.brand-column {
+  display: grid;
+  gap: 14px;
+  align-content: center;
+}
+
 .brand-logo {
   width: min(760px, 100%);
   filter: drop-shadow(0 24px 44px rgba(155, 227, 29, .18));
@@ -119,6 +125,7 @@ a {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  justify-self: center;
   padding: 0 18px;
   border: 1px solid rgba(155, 227, 29, .42);
   border-radius: 8px;
@@ -1265,6 +1272,10 @@ p {
 
   .brand-stage {
     min-height: 360px;
+  }
+
+  .brand-column {
+    align-content: start;
   }
 
   .app-header,

@@ -50,6 +50,10 @@ button {
   font: inherit;
 }
 
+body.menu-open {
+  overflow: hidden;
+}
+
 .site-header {
   position: fixed;
   top: 14px;
@@ -98,6 +102,12 @@ button {
 .site-header .nav-cta {
   color: #071006;
   background: var(--green);
+}
+
+.menu-toggle,
+.menu-close,
+.menu-backdrop {
+  display: none;
 }
 
 .hero-section {
@@ -588,6 +598,7 @@ h3 {
 .vest-mockup h3,
 .vest-mockup p {
   position: relative;
+  z-index: 2;
 }
 
 .vest-mockup p {
@@ -847,24 +858,91 @@ h3 {
 
 @media (max-width: 980px) {
   .site-header {
-    position: sticky;
-    top: 0;
-    width: 100%;
-    border-radius: 0;
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    right: 10px;
+    width: auto;
+    transform: none;
+    border-radius: 8px;
   }
 
-  .site-header nav a:not(.nav-cta) {
-    display: none;
-  }
-
-  .site-header nav a[href="index.html"] {
+  .menu-toggle,
+  .menu-close {
+    min-height: 40px;
     display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    color: #071006;
+    background: var(--green);
+    font-weight: 950;
+  }
+
+  .menu-close {
+    width: 100%;
+    margin-bottom: 8px;
+    color: var(--green);
+    background: #071006;
+  }
+
+  .site-header nav {
+    position: fixed;
+    top: 0;
+    right: 0;
+    z-index: 40;
+    width: min(320px, 82vw);
+    height: 100vh;
+    display: grid;
+    align-content: start;
+    gap: 10px;
+    padding: 18px;
+    border-left: 1px solid var(--line);
+    background: rgba(8, 11, 8, .94);
+    box-shadow: var(--shadow);
+    transform: translateX(105%);
+    transition: transform .28s ease;
+  }
+
+  .site-header nav a {
+    width: 100%;
+    min-height: 48px;
+    justify-content: center;
+    color: var(--ink);
+    background: rgba(255,255,255,.04);
+  }
+
+  .site-header .nav-cta {
+    color: #071006;
+    background: var(--green);
+  }
+
+  .menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, .52);
+    backdrop-filter: blur(9px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .28s ease;
+  }
+
+  body.menu-open .site-header nav {
+    transform: translateX(0);
+  }
+
+  body.menu-open .menu-backdrop {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
   }
 
   .hero-section {
     grid-template-columns: 1fr;
     min-height: auto;
-    padding-top: 72px;
+    padding-top: 112px;
     padding-bottom: 46px;
   }
 
@@ -895,11 +973,7 @@ h3 {
     width: min(148px, 42vw);
   }
 
-  .site-header nav {
-    gap: 6px;
-  }
-
-  .site-header nav a {
+  .menu-toggle {
     min-height: 36px;
     padding: 0 10px;
     font-size: 12px;
@@ -1030,6 +1104,18 @@ h3 {
   .tablet-mockup,
   .whatsapp-mockup {
     min-height: 260px;
+  }
+
+  .vest-mockup {
+    min-height: 335px;
+    padding-top: 210px;
+  }
+
+  .vest-mockup img {
+    top: 66px;
+    left: 20px;
+    right: 20px;
+    width: calc(100% - 40px);
   }
 
   .phone-screen {

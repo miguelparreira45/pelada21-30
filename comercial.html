@@ -12,7 +12,9 @@
       <a class="brand-link" href="#topo" aria-label="PeladaFast">
         <img src="peladafast-logo.png" alt="PeladaFast">
       </a>
-      <nav aria-label="Menu principal">
+      <button class="menu-toggle" data-menu-toggle type="button" aria-controls="siteMenu" aria-expanded="false">Menu</button>
+      <nav id="siteMenu" aria-label="Menu principal">
+        <button class="menu-close" data-menu-close type="button">Fechar</button>
         <a href="#vantagens">Vantagens</a>
         <a href="#mockups">Na pratica</a>
         <a href="#ranking">Rankings</a>
@@ -20,6 +22,7 @@
         <a class="nav-cta" data-whatsapp href="#">WhatsApp</a>
       </nav>
     </header>
+    <div class="menu-backdrop" data-menu-close></div>
 
     <main id="topo">
       <section class="hero-section">

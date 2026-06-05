@@ -7,6 +7,20 @@ document.querySelectorAll("[data-whatsapp]").forEach((link) => {
   link.rel = "noopener noreferrer";
 });
 
+const menuToggle = document.querySelector("[data-menu-toggle]");
+const menuCloseItems = document.querySelectorAll("[data-menu-close], #siteMenu a");
+
+function setMenuOpen(isOpen) {
+  document.body.classList.toggle("menu-open", isOpen);
+  menuToggle?.setAttribute("aria-expanded", String(isOpen));
+}
+
+menuToggle?.addEventListener("click", () => setMenuOpen(!document.body.classList.contains("menu-open")));
+menuCloseItems.forEach((item) => item.addEventListener("click", () => setMenuOpen(false)));
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") setMenuOpen(false);
+});
+
 const revealObserver = new IntersectionObserver((entries) => {
   entries.forEach((entry) => {
     if (entry.isIntersecting) entry.target.classList.add("in-view");
