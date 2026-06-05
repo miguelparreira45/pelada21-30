@@ -254,7 +254,6 @@ function toSeasonRow(season) {
 }
 
 async function createCloudProfile(user, payload) {
-  const firstSeasonId = crypto.randomUUID();
   const profileRow = {
     id: user.id,
     pelada_name: payload.peladaName,
@@ -262,20 +261,8 @@ async function createCloudProfile(user, payload) {
     email: payload.email,
     phone: payload.phone
   };
-  const seasonRow = {
-    id: firstSeasonId,
-    profile_id: user.id,
-    name: "Temporada principal"
-  };
   const { error: profileError } = await supabaseClient.from("pelada_profiles").insert(profileRow);
   if (profileError) throw profileError;
-  const { error: seasonError } = await supabaseClient.from("seasons").insert(seasonRow);
-  if (seasonError) throw seasonError;
-  const { error: updateError } = await supabaseClient
-    .from("pelada_profiles")
-    .update({ current_season_id: firstSeasonId })
-    .eq("id", user.id);
-  if (updateError) throw updateError;
   return loadCloudProfile(user);
 }
 
@@ -477,26 +464,35 @@ function ensureProfileDefaults(item) {
   item.players ||= [];
   item.seasons ||= [];
   item.publicShares ||= {};
-  if (!item.seasons.length) {
-    item.seasons.push({
-      id: crypto.randomUUID(),
-      name: "Temporada principal",
-      createdAt: new Date().toISOString()
-    });
+  removeEmptySuggestedSeason(item);
+  if (!item.currentSeasonId || !item.seasons.some((season) => season.id === item.currentSeasonId && !season.finishedAt)) {
+    item.currentSeasonId = activeSeason(item)?.id || null;
   }
-  item.currentSeasonId ||= item.seasons[0].id;
   item.draft ||= newDraft();
   item.draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
   item.draft.settings ||= { ...DEFAULT_SETTINGS };
   item.draft.settings = { ...DEFAULT_SETTINGS, ...item.draft.settings };
-  item.draft.seasonId ||= item.currentSeasonId;
+  item.draft.seasonId = item.currentSeasonId;
   item.draft.completedMatches ||= [];
   item.draft.playerStats ||= {};
   return item;
 }
 
+function removeEmptySuggestedSeason(item) {
+  const sessions = item.sessions || [];
+  item.seasons = (item.seasons || []).filter((season) => {
+    const isSuggested = normalizeText(season.name) === "temporada principal";
+    const hasSessions = sessions.some((session) => session.seasonId === season.id);
+    return !isSuggested || hasSessions;
+  });
+}
+
+function activeSeason(item = profile) {
+  return item?.seasons?.find((season) => !season.finishedAt) || null;
+}
+
 function currentSeason() {
-  return profile?.seasons?.find((season) => season.id === profile.currentSeasonId) || profile?.seasons?.[0];
+  return profile?.seasons?.find((season) => season.id === profile.currentSeasonId && !season.finishedAt) || activeSeason();
 }
 
 function matchDurationSeconds(match = draft.currentMatch) {
@@ -505,6 +501,10 @@ function matchDurationSeconds(match = draft.currentMatch) {
 
 function normalizeUsername(value) {
   return value.trim().toLowerCase().replace(/[^a-z0-9._]/g, "");
+}
+
+function normalizeText(value) {
+  return String(value || "").trim().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
 function onlyDigits(value) {
@@ -723,11 +723,6 @@ async function registerProfile(event) {
     }
   }
 
-  const firstSeason = {
-    id: crypto.randomUUID(),
-    name: "Temporada principal",
-    createdAt: new Date().toISOString()
-  };
   const newProfile = {
     id: crypto.randomUUID(),
     peladaName,
@@ -736,12 +731,11 @@ async function registerProfile(event) {
     phone,
     passwordHash: await hashPassword(password),
     createdAt: new Date().toISOString(),
-    seasons: [firstSeason],
-    currentSeasonId: firstSeason.id,
+    seasons: [],
+    currentSeasonId: null,
     sessions: [],
     draft: newDraft()
   };
-  newProfile.draft.seasonId = firstSeason.id;
 
   store.profiles.push(newProfile);
   store.activeProfileId = newProfile.id;
@@ -1104,20 +1098,25 @@ function deletePlayerProfile(playerId) {
 }
 
 function renderSeasonControls() {
-  els.seasonSelect.innerHTML = profile.seasons
-    .map((season) => `<option value="${season.id}">${escapeHtml(season.name)}</option>`)
-    .join("");
-  els.seasonSelect.value = profile.currentSeasonId;
+  const season = currentSeason();
+  if (season && profile.currentSeasonId !== season.id) {
+    profile.currentSeasonId = season.id;
+    draft.seasonId = season.id;
+  }
+  els.seasonSelect.innerHTML = season
+    ? `<option value="${season.id}">${escapeHtml(season.name)}</option>`
+    : `<option value="">Crie uma temporada para iniciar</option>`;
+  els.seasonSelect.value = season?.id || "";
+  els.seasonSelect.disabled = !season;
+  els.seasonForm.elements.seasonName.disabled = Boolean(season);
+  els.seasonForm.elements.seasonName.placeholder = season ? "Finalize a temporada atual para criar outra" : "Ex: Temporada 2026.1";
+  els.seasonForm.querySelector("button").disabled = Boolean(season);
 }
 
 function finishCurrentSeason() {
   const season = currentSeason();
   if (!season) return;
   const sessions = filteredSessions("season");
-  if (!sessions.length) {
-    alert("Esta temporada ainda nao tem peladas finalizadas.");
-    return;
-  }
   const stats = buildOverallStats(sessions);
   season.finishedAt = new Date().toISOString();
   season.awards = {
@@ -1128,6 +1127,8 @@ function finishCurrentSeason() {
     sessions: sessions.length,
     matches: sessions.reduce((sum, session) => sum + (session.matches?.length || 0), 0)
   };
+  profile.currentSeasonId = null;
+  draft.seasonId = null;
   saveStore();
   renderData();
   alert("Temporada finalizada e premiaçoes calculadas.");
@@ -1932,12 +1933,13 @@ function renderData() {
     button.classList.toggle("active", button.dataset.dataTab === activeDataTab);
   });
 
+  const season = currentSeason();
   const sessions = filteredSessions(activeDataTab);
   const ranking = buildOverall(sessions);
   const title = activeDataTab === "today"
     ? "Peladas de hoje"
     : activeDataTab === "season"
-      ? `Temporada: ${currentSeason()?.name || "Sem temporada"}`
+      ? `Temporada ativa: ${season?.name || "Nenhuma temporada ativa"}`
       : "Pelada geral";
 
   els.dataGrid.innerHTML = `
@@ -1945,7 +1947,8 @@ function renderData() {
     ${activeDataTab === "general" ? renderGeneralDataView() : `
     <section class="data-card">
       <h3>${escapeHtml(title)}</h3>
-      ${activeDataTab === "season" ? `<div class="card-actions"><button class="secondary-action" data-finish-season type="button">Finalizar temporada</button></div>` : ""}
+      ${activeDataTab === "season" && season ? `<div class="card-actions"><button class="secondary-action" data-finish-season type="button">Finalizar temporada ativa</button></div>` : ""}
+      ${activeDataTab === "season" && !season ? "<p>Crie uma temporada na aba Jogo para comecar a registrar peladas.</p>" : ""}
       ${activeDataTab === "today" ? `<p>Historico de partidas finalizadas hoje.</p>` : renderCharts(sessions)}
       <div class="leader-grid">
         <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
@@ -2341,7 +2344,8 @@ function filteredSessions(tab) {
   const sessions = profile.sessions || [];
   if (tab === "general") return sessions;
   if (tab === "season") {
-    return sessions.filter((session) => session.seasonId === profile.currentSeasonId);
+    const season = currentSeason();
+    return season ? sessions.filter((session) => session.seasonId === season.id) : [];
   }
   const today = new Date().toLocaleDateString("pt-BR");
   return sessions.filter((session) => new Date(session.date).toLocaleDateString("pt-BR") === today);
@@ -2573,6 +2577,12 @@ async function createSeason(event) {
   const input = event.currentTarget.elements.seasonName;
   const name = input.value.trim();
   if (!name) return;
+  const active = currentSeason();
+  if (active) {
+    alert(`Finalize a temporada "${active.name}" antes de criar uma nova.`);
+    input.value = "";
+    return;
+  }
   const exists = profile.seasons.some((season) => season.name.toLowerCase() === name.toLowerCase());
   if (exists) return;
   const season = { id: crypto.randomUUID(), name, createdAt: new Date().toISOString() };
