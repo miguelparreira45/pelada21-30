@@ -62,6 +62,7 @@ const els = {
   finalView: document.querySelector("#finalView"),
   teamsGrid: document.querySelector("#teamsGrid"),
   drawMatch: document.querySelector("#drawMatch"),
+  balanceTeams: document.querySelector("#balanceTeams"),
   seasonSelect: document.querySelector("#seasonSelect"),
   seasonForm: document.querySelector("#seasonForm"),
   matchSettingsForm: document.querySelector("#matchSettingsForm"),
@@ -80,8 +81,10 @@ const els = {
   goalTeam: document.querySelector("#goalTeam"),
   goalPlayer: document.querySelector("#goalPlayer"),
   assistPlayer: document.querySelector("#assistPlayer"),
+  undoLastGoal: document.querySelector("#undoLastGoal"),
   runningSummary: document.querySelector("#runningSummary"),
   statsList: document.querySelector("#statsList"),
+  matchTimeline: document.querySelector("#matchTimeline"),
   resultBand: document.querySelector("#resultBand"),
   winnerChoice: document.querySelector("#winnerChoice"),
   nextMatch: document.querySelector("#nextMatch"),
@@ -214,6 +217,8 @@ function toSessionRow(session) {
       topScorer: session.topScorer,
       topAssistant: session.topAssistant,
       topHot: session.topHot,
+      topMvp: session.topMvp,
+      playerRatings: session.playerRatings,
       winsByTeam: session.winsByTeam,
       report: session.report
     }
@@ -399,13 +404,18 @@ function recalculateImportedSession(session, targetProfile) {
     });
   });
   const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  const hasTeamWinner = session.winsByTeam[winnerTeamKey] > 0;
   session.winnerTeam = {
-    key: winnerTeamKey,
-    label: `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+    key: hasTeamWinner ? winnerTeamKey : "",
+    label: hasTeamWinner ? `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})` : "Sem vencedor por vitorias"
   };
   session.topScorer = topBy(session.stats, "goals", "Sem gols");
   session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
   session.topHot = topBy(session.stats, "wins", "Sem vitorias");
+  session.stats.forEach((item) => {
+    item.performanceScore = calculatePerformanceScore(item, item.rating || 3);
+  });
+  session.topMvp = topBy(session.stats, "performanceScore", "Sem destaque");
   session.report = buildReport(session);
 }
 
@@ -619,10 +629,11 @@ function escapeHtml(value) {
 }
 
 function formatClock(seconds) {
-  const safe = Math.max(0, seconds);
+  const negative = seconds < 0;
+  const safe = Math.abs(seconds);
   const min = String(Math.floor(safe / 60)).padStart(2, "0");
   const sec = String(safe % 60).padStart(2, "0");
-  return `${min}:${sec}`;
+  return `${negative ? "-" : ""}${min}:${sec}`;
 }
 
 function shuffle(items) {
@@ -846,11 +857,12 @@ function render() {
   els.setupView.classList.toggle("hidden", draft.mode !== "setup");
   els.matchView.classList.toggle("hidden", draft.mode !== "match");
   els.endedView.classList.toggle("hidden", draft.mode !== "ended");
-  els.finalView.classList.toggle("hidden", draft.mode !== "final");
+  els.finalView.classList.toggle("hidden", !["rating", "final"].includes(draft.mode));
 
   renderSetup();
   if (draft.currentMatch) renderMatch();
   if (draft.finishedMatch) renderEnded();
+  if (draft.mode === "rating") renderRatingView();
   if (draft.finalSummary) renderFinalSummary();
   saveStore();
 }
@@ -893,6 +905,7 @@ function renderSetup() {
   }).join("");
 
   els.drawMatch.disabled = !profile.currentSeasonId || !teamKeys().every((key) => draft.teams[key].players.length > 0);
+  els.balanceTeams.disabled = profile.players.length < 3;
 }
 
 function selectedPlayerRefs() {
@@ -1144,16 +1157,35 @@ function renderGoalForm() {
   els.goalTeam.innerHTML = active.map((key) => `<option value="${key}">${teamName(key)}</option>`).join("");
   if (!active.includes(els.goalTeam.value)) els.goalTeam.value = active[0];
   fillPlayerOptions();
-  els.goalForm.querySelectorAll("select, button").forEach((field) => {
+  els.goalForm.querySelectorAll("select, button[type='submit']").forEach((field) => {
     field.disabled = !canRegisterGoal;
   });
+  updateGoalFormState();
+  els.undoLastGoal.disabled = !draft.currentMatch?.goals?.length;
 }
 
 function fillPlayerOptions() {
   const teamKey = els.goalTeam.value;
   const players = matchRoster(teamKey);
+  const previousScorer = players.includes(els.goalPlayer.value) ? els.goalPlayer.value : players[0] || "";
+  const previousAssistant = els.assistPlayer.value;
   els.goalPlayer.innerHTML = players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
-  els.assistPlayer.innerHTML = `<option value="">Sem assistencia</option>` + players.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("");
+  els.goalPlayer.value = previousScorer;
+  const scorer = els.goalPlayer.value || players[0] || "";
+  const assistOptions = players.filter((ref) => ref !== scorer);
+  els.assistPlayer.innerHTML = assistOptions.length
+    ? `<option value="">Escolha a assistencia</option>` + assistOptions.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")
+    : `<option value="">Sem outro jogador no time</option>`;
+  if (assistOptions.includes(previousAssistant)) els.assistPlayer.value = previousAssistant;
+  els.assistPlayer.disabled = !assistOptions.length;
+  updateGoalFormState();
+}
+
+function updateGoalFormState() {
+  const submit = els.goalForm.querySelector("button[type='submit']");
+  if (!submit) return;
+  const canRegisterGoal = Boolean(draft.currentMatch?.isRunning || draft.currentMatch?.isTimeUp);
+  submit.disabled = !canRegisterGoal || !els.goalPlayer.value || !els.assistPlayer.value || els.goalPlayer.value === els.assistPlayer.value;
 }
 
 function renderStats() {
@@ -1164,6 +1196,7 @@ function renderStats() {
   if (!stats.length) {
     els.runningSummary.textContent = "Nenhum gol marcado ainda.";
     els.statsList.innerHTML = "";
+    renderTimeline();
     return;
   }
 
@@ -1175,26 +1208,64 @@ function renderStats() {
       <span>${item.goals} G / ${item.assists} A / ${item.wins} V</span>
     </div>
   `).join("");
+  renderTimeline();
+}
+
+function renderTimeline() {
+  const goals = draft.currentMatch?.goals || [];
+  if (!goals.length) {
+    els.matchTimeline.innerHTML = `<p class="empty-note">Linha do tempo aparece aqui quando sair gol.</p>`;
+    return;
+  }
+  els.matchTimeline.innerHTML = `
+    <h3>Linha do tempo</h3>
+    <div class="timeline-list">
+      ${goals.slice().reverse().map((goal, reverseIndex) => {
+        const number = goals.length - reverseIndex;
+        const index = number - 1;
+        return `
+          <article class="timeline-item" style="--team-color: ${teamColor(goal.teamKey)}">
+            <strong>${number}. ${teamName(goal.teamKey)} - ${escapeHtml(playerDisplayName(goal.scorer))}</strong>
+            <span>${formatClock(goal.at)} | Assistencia: ${escapeHtml(playerDisplayName(goal.assistant))}</span>
+            <div class="timeline-actions">
+              <button class="secondary-action" data-edit-goal="${index}" type="button">Corrigir</button>
+              <button class="danger-action" data-delete-goal="${index}" type="button">Apagar</button>
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
 }
 
 function renderEnded() {
   const match = draft.finishedMatch;
-  const scoreLine = match.playing.map((key) => `${teamName(key)} ${match.score[key]}`).join(" x ");
-  const winner = match.winner ? teamName(match.winner) : null;
+  const scoreLine = match.playing.map((key) => `${teamName(key, match)} ${match.score[key]}`).join(" x ");
+  const winner = match.winner ? teamName(match.winner, match) : null;
+  const king = match.kingTable ? teamName(match.stayTeam, match) : null;
   els.resultBand.innerHTML = `
     <p class="eyebrow">Partida ${draft.matchNumber} encerrada</p>
     <h2>${scoreLine}</h2>
-    <p>${winner ? `Vencedor: ${winner}` : "Empate no tempo. Escolha quem fica para iniciar a proxima partida."}</p>
+    <p>${winner ? `Vencedor: ${winner}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : king ? `Rei da mesa: ${king} permanece em campo sem contar vitoria.` : "Empate no tempo. Escolha rei da mesa ou defina um vencedor."}</p>
   `;
 
-  const needsWinner = !match.winner;
-  els.winnerChoice.classList.toggle("hidden", !needsWinner);
-  els.nextMatch.disabled = needsWinner;
-  if (needsWinner) {
+  const needsResolution = !match.winner && !match.kingTable;
+  els.winnerChoice.classList.toggle("hidden", !needsResolution);
+  els.nextMatch.disabled = needsResolution;
+  els.finishSession.disabled = needsResolution;
+  if (needsResolution) {
     els.winnerChoice.innerHTML = `
-      <h3>Quem fica?</h3>
+      <h3>Como resolver o empate?</h3>
       <div class="choice-buttons">
-        ${match.playing.map((key) => `<button class="secondary-action" data-winner="${key}">${teamName(key)}</button>`).join("")}
+        <button class="primary-action" data-king-table="${match.enteredTeam || match.playing[1]}">Rei da mesa: ${teamName(match.enteredTeam || match.playing[1], match)}</button>
+      </div>
+      <p>Rei da mesa mantem em campo quem veio da de fora, mas nao soma vitoria.</p>
+      <label class="overtime-choice">
+        <input type="checkbox" id="overtimeGoalChoice">
+        Teve gol apos o tempo regulamentar
+      </label>
+      <div class="choice-buttons">
+        ${match.playing.map((key) => `<button class="secondary-action" data-winner="${key}">Escolher vencedor: ${teamName(key, match)}</button>`).join("")}
       </div>
     `;
   } else {
@@ -1211,13 +1282,19 @@ function renderFinalSummary() {
       <div class="leader-box"><span>Time vitorioso</span><strong>${escapeHtml(summary.winnerTeam.label)}</strong></div>
       <div class="leader-box"><span>Artilheiro do dia</span><strong>${escapeHtml(summary.topScorer.label)}</strong></div>
       <div class="leader-box"><span>Garcom do dia</span><strong>${escapeHtml(summary.topAssistant.label)}</strong></div>
+      <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(summary.topHot.label)}</strong></div>
+      <div class="leader-box"><span>Destaque da noite</span><strong>${escapeHtml(summary.topMvp?.label || "Sem destaque")}</strong></div>
     </div>
     <div class="next-actions">
       <button class="primary-action big" id="freshSession">Nova pelada</button>
+      <button class="secondary-action" id="copyFinalReport">Copiar resumo</button>
       <button class="secondary-action" id="openDataFromFinal">Ver dados</button>
     </div>
   `;
   document.querySelector("#freshSession").addEventListener("click", resetDraft);
+  document.querySelector("#copyFinalReport").addEventListener("click", () => {
+    navigator.clipboard?.writeText(summary.report || "").then(() => alert("Resumo copiado."));
+  });
   document.querySelector("#openDataFromFinal").addEventListener("click", () => showAppTab("data"));
 }
 
@@ -1226,11 +1303,8 @@ function startTimer() {
   timerId = setInterval(() => {
     if (!draft.currentMatch) return clearInterval(timerId);
     draft.currentMatch.remaining -= 1;
-    if (draft.currentMatch.remaining <= 0) {
-      draft.currentMatch.remaining = 0;
-      draft.currentMatch.isRunning = false;
+    if (draft.currentMatch.remaining <= 0 && !draft.currentMatch.isTimeUp) {
       draft.currentMatch.isTimeUp = true;
-      clearInterval(timerId);
       render();
       return;
     }
@@ -1245,6 +1319,51 @@ function startFirstMatch() {
   startMatch([order[0], order[1]], order[2]);
 }
 
+function balanceTeamsByPerformance() {
+  if (profile.players.length < 3) return;
+  const totals = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  const counts = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  draft.teams = Object.fromEntries(teamKeys().map((key) => [key, { players: [] }]));
+  draft.playerStats = {};
+
+  profile.players
+    .slice()
+    .sort((a, b) => playerPower(b.id) - playerPower(a.id) || `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`))
+    .forEach((player) => {
+      const target = teamKeys()
+        .slice()
+        .sort((a, b) => totals[a] - totals[b] || counts[a] - counts[b])[0];
+      draft.teams[target].players.push(player.id);
+      totals[target] += playerPower(player.id);
+      counts[target] += 1;
+      ensurePlayerStats(target, player.id);
+    });
+  render();
+}
+
+function playerPower(playerId) {
+  const sessions = profile.sessions || [];
+  let goals = 0;
+  let assists = 0;
+  let wins = 0;
+  let ratingSum = 0;
+  let ratingCount = 0;
+  sessions.forEach((session) => {
+    (session.stats || []).forEach((item) => {
+      if (item.id !== playerId && item.playerId !== playerId) return;
+      goals += Number(item.goals) || 0;
+      assists += Number(item.assists) || 0;
+      wins += Number(item.wins) || 0;
+      if (item.rating) {
+        ratingSum += Number(item.rating) || 0;
+        ratingCount += 1;
+      }
+    });
+  });
+  const rating = ratingCount ? ratingSum / ratingCount : 3;
+  return calculatePerformanceScore({ goals, assists, wins }, rating);
+}
+
 function startMatch(playing, bench) {
   draft.matchNumber += 1;
   const durationMinutes = Number(draft.settings.durationMinutes) || DEFAULT_SETTINGS.durationMinutes;
@@ -1252,6 +1371,7 @@ function startMatch(playing, bench) {
   draft.currentMatch = {
     playing,
     bench,
+    enteredTeam: playing[1],
     score: { [playing[0]]: 0, [playing[1]]: 0 },
     guests: { [playing[0]]: [], [playing[1]]: [] },
     goals: [],
@@ -1280,18 +1400,19 @@ function registerGoal(event) {
   const teamKey = els.goalTeam.value;
   const scorer = els.goalPlayer.value;
   const assistant = els.assistPlayer.value;
-  if (!teamKey || !scorer) return;
+  if (!teamKey || !scorer || !assistant || assistant === scorer) {
+    alert("Escolha quem fez o gol e quem deu a assistencia. A assistencia e obrigatoria.");
+    return;
+  }
 
   ensurePlayerStats(teamKey, scorer).goals += 1;
-  if (assistant && assistant !== scorer) {
-    ensurePlayerStats(teamKey, assistant).assists += 1;
-  }
+  ensurePlayerStats(teamKey, assistant).assists += 1;
 
   draft.currentMatch.score[teamKey] += 1;
   draft.currentMatch.goals.push({
     teamKey,
     scorer,
-    assistant: assistant && assistant !== scorer ? assistant : "",
+    assistant,
     at: matchDurationSeconds(draft.currentMatch) - draft.currentMatch.remaining
   });
   celebrateGoal(teamKey);
@@ -1301,6 +1422,36 @@ function registerGoal(event) {
   } else {
     render();
   }
+}
+
+function undoLastGoal() {
+  const match = draft.currentMatch;
+  if (!match?.goals?.length) return;
+  removeGoalAt(match.goals.length - 1);
+}
+
+function removeGoalAt(index) {
+  const match = draft.currentMatch;
+  if (!match?.goals?.[index]) return null;
+  const [goal] = match.goals.splice(index, 1);
+  match.score[goal.teamKey] = Math.max(0, (match.score[goal.teamKey] || 0) - 1);
+  const scorerStat = draft.playerStats[playerStatId(goal.scorer)];
+  if (scorerStat) scorerStat.goals = Math.max(0, (scorerStat.goals || 0) - 1);
+  const assistantStat = draft.playerStats[playerStatId(goal.assistant)];
+  if (assistantStat) assistantStat.assists = Math.max(0, (assistantStat.assists || 0) - 1);
+  render();
+  return goal;
+}
+
+function editGoalAt(index) {
+  const goal = removeGoalAt(index);
+  if (!goal) return;
+  els.goalTeam.value = goal.teamKey;
+  fillPlayerOptions();
+  els.goalPlayer.value = goal.scorer;
+  fillPlayerOptions();
+  els.assistPlayer.value = goal.assistant;
+  updateGoalFormState();
 }
 
 function finishCurrentMatch(reason, forcedWinner = null) {
@@ -1322,30 +1473,84 @@ function finishCurrentMatch(reason, forcedWinner = null) {
 
 function chooseWinner(teamKey) {
   draft.finishedMatch.winner = teamKey;
+  draft.finishedMatch.kingTable = false;
+  draft.finishedMatch.stayTeam = "";
+  draft.finishedMatch.overtimeGoal = Boolean(document.querySelector("#overtimeGoalChoice")?.checked);
+  render();
+}
+
+function chooseKingTable(teamKey) {
+  draft.finishedMatch.winner = null;
+  draft.finishedMatch.kingTable = true;
+  draft.finishedMatch.stayTeam = teamKey;
+  draft.finishedMatch.overtimeGoal = false;
   render();
 }
 
 function storeFinishedMatch() {
-  if (!draft.finishedMatch?.winner || draft.finishedMatch.stored) return;
+  if ((!draft.finishedMatch?.winner && !draft.finishedMatch?.kingTable) || draft.finishedMatch.stored) return;
   const match = { ...draft.finishedMatch, stored: true };
   draft.completedMatches.push(match);
-  matchRoster(match.winner, match).forEach((ref) => {
-    ensurePlayerStats(match.winner, ref).wins += 1;
-  });
+  if (match.winner) {
+    matchRoster(match.winner, match).forEach((ref) => {
+      ensurePlayerStats(match.winner, ref).wins += 1;
+    });
+  }
   draft.finishedMatch.stored = true;
   saveStore();
 }
 
 function startNextMatch() {
   storeFinishedMatch();
-  const winner = draft.finishedMatch.winner;
-  const bench = draft.finishedMatch.bench;
-  const loser = draft.finishedMatch.playing.find((teamKey) => teamKey !== winner);
-  startMatch([winner, bench], loser);
+  const stay = draft.finishedMatch.winner || draft.finishedMatch.stayTeam;
+  const entering = draft.finishedMatch.bench;
+  const leaving = draft.finishedMatch.playing.find((teamKey) => teamKey !== stay);
+  startMatch([stay, entering], leaving);
 }
 
 function finishSession() {
   storeFinishedMatch();
+  draft.playerRatings ||= {};
+  Object.values(draft.playerStats).forEach((item) => {
+    draft.playerRatings[item.id] ||= 3;
+  });
+  draft.mode = "rating";
+  saveStore();
+  render();
+}
+
+function renderRatingView() {
+  const players = Object.values(draft.playerStats)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  els.finalView.innerHTML = `
+    <p class="eyebrow">Notas da pelada</p>
+    <h2>Avalie cada jogador</h2>
+    <p>Use notas de 1 a 5 para ajustar a forca do jogador ao longo do tempo. Isso ajuda o sistema a criar uma nota mais justa.</p>
+    <form id="ratingForm" class="rating-form">
+      ${players.map((item) => `
+        <label class="rating-row">
+          <span>
+            <strong>${escapeHtml(item.name)}</strong>
+            <small>${item.goals} G / ${item.assists} A / ${item.wins} V</small>
+          </span>
+          <input name="rating_${item.id}" type="range" min="1" max="5" step="1" value="${draft.playerRatings?.[item.id] || 3}" data-rating-input="${item.id}">
+          <output>${draft.playerRatings?.[item.id] || 3}</output>
+        </label>
+      `).join("")}
+      <div class="next-actions">
+        <button class="primary-action big" type="submit">Salvar notas e finalizar</button>
+      </div>
+    </form>
+  `;
+}
+
+function completeSessionRatings(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  draft.playerRatings = {};
+  Object.values(draft.playerStats).forEach((item) => {
+    draft.playerRatings[item.id] = Number(form.elements[`rating_${item.id}`]?.value) || 3;
+  });
   const summary = buildSessionSummary();
   profile.sessions.push(summary);
   draft.finalSummary = summary;
@@ -1355,17 +1560,26 @@ function finishSession() {
 }
 
 function buildSessionSummary() {
-  const stats = Object.values(draft.playerStats);
+  const stats = Object.values(draft.playerStats).map((item) => {
+    const rating = Number(draft.playerRatings?.[item.id]) || 3;
+    return {
+      ...item,
+      rating,
+      performanceScore: calculatePerformanceScore(item, rating)
+    };
+  });
   const winsByTeam = Object.fromEntries(teamKeys().map((key) => [key, 0]));
   draft.completedMatches.forEach((match) => {
     if (match.winner) winsByTeam[match.winner] += 1;
   });
 
   const winnerTeamKey = teamKeys().sort((a, b) => winsByTeam[b] - winsByTeam[a])[0];
+  const hasTeamWinner = winsByTeam[winnerTeamKey] > 0;
   const teamColors = structuredClone(draft.teamColors || { blue: "blue", red: "red", green: "green" });
   const topScorer = topBy(stats, "goals", "Sem gols");
   const topAssistant = topBy(stats, "assists", "Sem assistencias");
   const topHot = topBy(stats, "wins", "Sem vitorias");
+  const topMvp = topBy(stats, "performanceScore", "Sem destaque");
   const season = currentSeason();
   const summary = {
     id: crypto.randomUUID(),
@@ -1377,14 +1591,16 @@ function buildSessionSummary() {
     teams: structuredClone(draft.teams),
     matches: structuredClone(draft.completedMatches),
     stats: structuredClone(stats),
+    playerRatings: { ...(draft.playerRatings || {}) },
     winsByTeam,
     winnerTeam: {
-      key: winnerTeamKey,
-      label: `${teamName(winnerTeamKey, { teamColors })} (${winsByTeam[winnerTeamKey]} vitoria${winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+      key: hasTeamWinner ? winnerTeamKey : "",
+      label: hasTeamWinner ? `${teamName(winnerTeamKey, { teamColors })} (${winsByTeam[winnerTeamKey]} vitoria${winsByTeam[winnerTeamKey] === 1 ? "" : "s"})` : "Sem vencedor por vitorias"
     },
     topScorer,
     topAssistant,
-    topHot
+    topHot,
+    topMvp
   };
   summary.report = buildReport(summary);
   return summary;
@@ -1403,6 +1619,13 @@ function topBy(stats, field, fallback) {
   };
 }
 
+function calculatePerformanceScore(item, rating = 3) {
+  return ((Number(item.goals) || 0) * 3)
+    + ((Number(item.assists) || 0) * 2)
+    + ((Number(item.wins) || 0) * 1.5)
+    + ((Number(rating) || 3) * 2);
+}
+
 function buildReport(summary) {
   const lines = [
     `Relatorio ${profile.peladaName}`,
@@ -1411,6 +1634,7 @@ function buildReport(summary) {
     `Artilheiro: ${summary.topScorer.label}`,
     `Maior assistente: ${summary.topAssistant.label}`,
     `Pe quente: ${summary.topHot.label}`,
+    `Destaque PeladaFast: ${summary.topMvp?.label || "Sem destaque"}`,
     "",
     "Jogadores:"
   ];
@@ -1421,7 +1645,10 @@ function buildReport(summary) {
   lines.push("", "Partidas:");
   summary.matches.forEach((match, index) => {
     const score = match.playing.map((key) => `${teamName(key, summary)} ${match.score[key]}`).join(" x ");
-    lines.push(`- Jogo ${index + 1}: ${score}. Vencedor: ${teamName(match.winner, summary)}`);
+    const result = match.winner
+      ? `Vencedor: ${teamName(match.winner, summary)}${match.overtimeGoal ? " (gol apos o tempo)" : ""}`
+      : `Rei da mesa: ${teamName(match.stayTeam, summary)}`;
+    lines.push(`- Jogo ${index + 1}: ${score}. ${result}`);
   });
 
   return lines.join("\n");
@@ -1449,6 +1676,7 @@ function renderData() {
         <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
         <div class="leader-box"><span>Assistencias</span><strong>${escapeHtml(ranking.topAssistant.label)}</strong></div>
         <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(ranking.topHot.label)}</strong></div>
+        <div class="leader-box"><span>Nota PeladaFast</span><strong>${escapeHtml(ranking.topMvp.label)}</strong></div>
       </div>
     </section>
     <section class="data-card">
@@ -1496,7 +1724,8 @@ function buildSharePayload() {
   const rankings = {
     goals: rankingFor(stats, "goals"),
     assists: rankingFor(stats, "assists"),
-    hot: rankingFor(stats, "wins")
+    hot: rankingFor(stats, "wins"),
+    mvp: rankingFor(stats, "performanceScore")
   };
   const teamWins = Object.fromEntries(teamKeys().map((key) => [key, 0]));
   seasonSessions.forEach((session) => {
@@ -1607,6 +1836,10 @@ function renderPublicPayload(payload, isPreview = false) {
       <h3>Pe quente</h3>
       ${renderPublicRanking(payload.rankings.hot, "vitoria")}
     </section>
+    <section class="data-card ranking-card">
+      <h3>Nota PeladaFast</h3>
+      ${renderPublicRanking(payload.rankings.mvp || [], "ponto")}
+    </section>
     <section class="data-card champion-history">
       <h3>Campeoes da temporada</h3>
       <div class="data-list">
@@ -1715,6 +1948,7 @@ function renderCharts(sessions) {
       ${renderChart("Disputa pela artilharia", stats, "goals")}
       ${renderChart("Disputa por assistencias", stats, "assists")}
       ${renderChart("Disputa pe quente", stats, "wins")}
+      ${renderChart("Nota PeladaFast", stats, "performanceScore")}
     </div>
   `;
 }
@@ -1756,7 +1990,8 @@ function renderSessionCard(session) {
   const date = new Date(session.date).toLocaleString("pt-BR");
   const matches = session.matches.map((match, index) => {
     const score = match.playing.map((key) => `${teamName(key, session)} ${match.score[key]}`).join(" x ");
-    return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score}</span></div>`;
+    const result = match.winner ? teamName(match.winner, session) : `Rei da mesa: ${teamName(match.stayTeam, session)}`;
+    return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${escapeHtml(result)}</span></div>`;
   }).join("");
 
   return `
@@ -1839,7 +2074,8 @@ function buildOverall(sessions) {
   return {
     topScorer: topBy(stats, "goals", "Sem gols"),
     topAssistant: topBy(stats, "assists", "Sem assistencias"),
-    topHot: topBy(stats, "wins", "Sem vitorias")
+    topHot: topBy(stats, "wins", "Sem vitorias"),
+    topMvp: topBy(stats, "performanceScore", "Sem nota")
   };
 }
 
@@ -1847,12 +2083,20 @@ function buildOverallStats(sessions) {
   const total = {};
   sessions.flatMap((session) => session.stats).forEach((item) => {
     const key = item.playerId || item.id || item.name.toLowerCase();
-    if (!total[key]) total[key] = { name: item.name, goals: 0, assists: 0, wins: 0 };
+    if (!total[key]) total[key] = { name: item.name, goals: 0, assists: 0, wins: 0, ratingSum: 0, ratingCount: 0, performanceScore: 0 };
     total[key].goals += item.goals;
     total[key].assists += item.assists;
     total[key].wins += item.wins;
+    if (item.rating) {
+      total[key].ratingSum += Number(item.rating) || 0;
+      total[key].ratingCount += 1;
+    }
+    total[key].performanceScore += Number(item.performanceScore) || calculatePerformanceScore(item, item.rating || 3);
   });
-  return Object.values(total);
+  return Object.values(total).map((item) => ({
+    ...item,
+    rating: item.ratingCount ? Number((item.ratingSum / item.ratingCount).toFixed(1)) : 0
+  }));
 }
 
 function deleteSession(sessionId) {
@@ -1924,13 +2168,18 @@ function recalculateSession(session) {
   });
 
   const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  const hasTeamWinner = session.winsByTeam[winnerTeamKey] > 0;
   session.winnerTeam = {
-    key: winnerTeamKey,
-    label: `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+    key: hasTeamWinner ? winnerTeamKey : "",
+    label: hasTeamWinner ? `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})` : "Sem vencedor por vitorias"
   };
   session.topScorer = topBy(session.stats, "goals", "Sem gols");
   session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
   session.topHot = topBy(session.stats, "wins", "Sem vitorias");
+  session.stats.forEach((item) => {
+    item.performanceScore = calculatePerformanceScore(item, item.rating || 3);
+  });
+  session.topMvp = topBy(session.stats, "performanceScore", "Sem destaque");
   session.report = buildReport(session);
 }
 
@@ -2132,15 +2381,41 @@ els.lineupCheck.addEventListener("click", (event) => {
 });
 
 els.drawMatch.addEventListener("click", startFirstMatch);
+els.balanceTeams.addEventListener("click", balanceTeamsByPerformance);
 els.startCountdown.addEventListener("click", startCountdown);
 els.endTimedMatch.addEventListener("click", () => finishCurrentMatch("time"));
 els.goalTeam.addEventListener("change", fillPlayerOptions);
+els.goalPlayer.addEventListener("change", fillPlayerOptions);
 els.goalForm.addEventListener("submit", registerGoal);
+els.undoLastGoal.addEventListener("click", undoLastGoal);
+els.matchTimeline.addEventListener("click", (event) => {
+  const editButton = event.target.closest("[data-edit-goal]");
+  if (editButton) {
+    editGoalAt(Number(editButton.dataset.editGoal));
+    return;
+  }
+  const deleteButton = event.target.closest("[data-delete-goal]");
+  if (deleteButton) removeGoalAt(Number(deleteButton.dataset.deleteGoal));
+});
 els.nextMatch.addEventListener("click", startNextMatch);
 els.finishSession.addEventListener("click", finishSession);
 els.winnerChoice.addEventListener("click", (event) => {
+  const kingButton = event.target.closest("[data-king-table]");
+  if (kingButton) {
+    chooseKingTable(kingButton.dataset.kingTable);
+    return;
+  }
   const button = event.target.closest("[data-winner]");
   if (button) chooseWinner(button.dataset.winner);
+});
+els.finalView.addEventListener("input", (event) => {
+  const input = event.target.closest("[data-rating-input]");
+  if (!input) return;
+  const output = input.closest(".rating-row")?.querySelector("output");
+  if (output) output.textContent = input.value;
+});
+els.finalView.addEventListener("submit", (event) => {
+  if (event.target.matches("#ratingForm")) completeSessionRatings(event);
 });
 els.newSession.addEventListener("click", resetDraft);
 els.publishShare.addEventListener("click", publishSharePage);

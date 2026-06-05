@@ -121,7 +121,10 @@
               <p class="eyebrow">Times da rodada</p>
               <h2>Monte azul, vermelho e verde</h2>
             </div>
-            <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
+            <div class="section-actions">
+              <button class="secondary-action" id="balanceTeams">Sugerir times equilibrados</button>
+              <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
+            </div>
           </div>
           <div class="teams-grid" id="teamsGrid"></div>
         </section>
@@ -154,6 +157,7 @@
                 <label>Gol de<select id="goalPlayer"></select></label>
                 <label>Assistencia<select id="assistPlayer"></select></label>
                 <button class="primary-action" type="submit">Marcar gol</button>
+                <button class="secondary-action" id="undoLastGoal" type="button">Desfazer ultimo gol</button>
               </form>
             </section>
 
@@ -163,6 +167,7 @@
                 <p id="runningSummary">Nenhum gol marcado ainda.</p>
               </div>
               <div class="stats-list" id="statsList"></div>
+              <div class="match-timeline" id="matchTimeline"></div>
             </section>
           </div>
         </section>
