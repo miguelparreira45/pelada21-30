@@ -18,7 +18,7 @@ const TEAM_COLOR_OPTIONS = [
 ];
 
 const STORE_KEY = "peladafast-store-v2";
-const DEFAULT_SETTINGS = { durationMinutes: 7, goalLimit: 2 };
+const DEFAULT_SETTINGS = { durationMinutes: 7, goalLimit: 2, playersPerTeam: 5 };
 
 let store = loadStore();
 let profile = null;
@@ -68,6 +68,7 @@ const els = {
   matchSettingsForm: document.querySelector("#matchSettingsForm"),
   durationInput: document.querySelector("#durationInput"),
   goalLimitInput: document.querySelector("#goalLimitInput"),
+  playersPerTeamInput: document.querySelector("#playersPerTeamInput"),
   leftPanel: document.querySelector("#leftPanel"),
   rightPanel: document.querySelector("#rightPanel"),
   lineupCheck: document.querySelector("#lineupCheck"),
@@ -184,7 +185,13 @@ async function loadCloudProfile(user) {
 }
 
 function fromSeasonRow(row) {
-  return { id: row.id, name: row.name, createdAt: row.created_at };
+  return {
+    id: row.id,
+    name: row.name,
+    createdAt: row.created_at,
+    finishedAt: row.finished_at || null,
+    awards: row.awards || null
+  };
 }
 
 function fromPlayerRow(row) {
@@ -236,6 +243,16 @@ function toSessionRow(session) {
   };
 }
 
+function toSeasonRow(season) {
+  return {
+    id: season.id,
+    profile_id: currentUser.id,
+    name: season.name,
+    finished_at: season.finishedAt || null,
+    awards: season.awards || null
+  };
+}
+
 async function createCloudProfile(user, payload) {
   const firstSeasonId = crypto.randomUUID();
   const profileRow = {
@@ -274,6 +291,10 @@ async function saveCloudState() {
 
   await Promise.all(profile.sessions.map((session) =>
     supabaseClient.from("sessions").upsert(toSessionRow(session))
+  ));
+
+  await Promise.all(profile.seasons.map((season) =>
+    supabaseClient.from("seasons").upsert(toSeasonRow(season))
   ));
 }
 
@@ -467,6 +488,7 @@ function ensureProfileDefaults(item) {
   item.draft ||= newDraft();
   item.draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
   item.draft.settings ||= { ...DEFAULT_SETTINGS };
+  item.draft.settings = { ...DEFAULT_SETTINGS, ...item.draft.settings };
   item.draft.seasonId ||= item.currentSeasonId;
   item.draft.completedMatches ||= [];
   item.draft.playerStats ||= {};
@@ -884,6 +906,7 @@ function renderSetup() {
   renderSeasonControls();
   els.durationInput.value = draft.settings.durationMinutes;
   els.goalLimitInput.value = draft.settings.goalLimit;
+  els.playersPerTeamInput.value = draft.settings.playersPerTeam || DEFAULT_SETTINGS.playersPerTeam;
   els.teamsGrid.innerHTML = teamKeys().map((key) => {
     const meta = teamMeta(key);
     const players = draft.teams[key].players;
@@ -1085,6 +1108,35 @@ function renderSeasonControls() {
     .map((season) => `<option value="${season.id}">${escapeHtml(season.name)}</option>`)
     .join("");
   els.seasonSelect.value = profile.currentSeasonId;
+}
+
+function finishCurrentSeason() {
+  const season = currentSeason();
+  if (!season) return;
+  const sessions = filteredSessions("season");
+  if (!sessions.length) {
+    alert("Esta temporada ainda nao tem peladas finalizadas.");
+    return;
+  }
+  const stats = buildOverallStats(sessions);
+  season.finishedAt = new Date().toISOString();
+  season.awards = {
+    topScorers: tiedLeaders(stats, "goals"),
+    topAssistants: tiedLeaders(stats, "assists"),
+    topHot: tiedLeaders(stats, "wins"),
+    topMvp: tiedLeaders(stats, "performanceScore"),
+    sessions: sessions.length,
+    matches: sessions.reduce((sum, session) => sum + (session.matches?.length || 0), 0)
+  };
+  saveStore();
+  renderData();
+  alert("Temporada finalizada e premiaçoes calculadas.");
+}
+
+function tiedLeaders(stats, field) {
+  const max = Math.max(0, ...stats.map((item) => Number(item[field]) || 0));
+  if (!max) return [];
+  return stats.filter((item) => Number(item[field]) === max).map((item) => ({ name: item.name, value: Number(item[field]) || 0 }));
 }
 
 function renderMatch() {
@@ -1423,6 +1475,7 @@ function startFirstMatch() {
 
 function balanceTeamsByPerformance() {
   if (profile.players.length < 3) return;
+  const limit = Math.max(1, Number(draft.settings.playersPerTeam) || DEFAULT_SETTINGS.playersPerTeam);
   const totals = Object.fromEntries(teamKeys().map((key) => [key, 0]));
   const counts = Object.fromEntries(teamKeys().map((key) => [key, 0]));
   draft.teams = Object.fromEntries(teamKeys().map((key) => [key, { players: [] }]));
@@ -1434,7 +1487,9 @@ function balanceTeamsByPerformance() {
     .forEach((player) => {
       const target = teamKeys()
         .slice()
+        .filter((key) => counts[key] < limit)
         .sort((a, b) => totals[a] - totals[b] || counts[a] - counts[b])[0];
+      if (!target) return;
       draft.teams[target].players.push(player.id);
       totals[target] += playerPower(player.id);
       counts[target] += 1;
@@ -1887,8 +1942,10 @@ function renderData() {
 
   els.dataGrid.innerHTML = `
     ${editingSessionId ? renderSessionEditor(editingSessionId) : ""}
+    ${activeDataTab === "general" ? renderGeneralDataView() : `
     <section class="data-card">
       <h3>${escapeHtml(title)}</h3>
+      ${activeDataTab === "season" ? `<div class="card-actions"><button class="secondary-action" data-finish-season type="button">Finalizar temporada</button></div>` : ""}
       ${activeDataTab === "today" ? `<p>Historico de partidas finalizadas hoje.</p>` : renderCharts(sessions)}
       <div class="leader-grid">
         <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
@@ -1903,6 +1960,74 @@ function renderData() {
         ${sessions.length ? sessions.slice().reverse().map(renderSessionCard).join("") : "<p>Nenhuma pelada finalizada ainda.</p>"}
       </div>
     </section>
+    `}
+  `;
+}
+
+function renderGeneralDataView() {
+  const sessions = filteredSessions("general");
+  const stats = buildOverallStats(sessions);
+  return `
+    <section class="data-card general-top">
+      <h3>Resumo geral</h3>
+      <div class="top5-grid">
+        ${renderTopFive("Artilheiros gerais", stats, "goals", "gol")}
+        ${renderTopFive("Assistentes gerais", stats, "assists", "assist.")}
+        ${renderTopFive("Pes quentes gerais", stats, "wins", "vitoria")}
+      </div>
+    </section>
+    <section class="data-card season-drawers">
+      <h3>Temporadas</h3>
+      ${profile.seasons.map(renderSeasonDrawer).join("")}
+    </section>
+  `;
+}
+
+function renderTopFive(title, stats, field, label) {
+  const rows = stats
+    .filter((item) => Number(item[field]) > 0)
+    .sort((a, b) => Number(b[field]) - Number(a[field]) || a.name.localeCompare(b.name))
+    .slice(0, 5);
+  return `
+    <div class="leader-box">
+      <h3>${title}</h3>
+      ${rows.length ? rows.map((item, index) => `<div class="summary-row"><strong>${index + 1}. ${escapeHtml(item.name)}</strong><span>${item[field]} ${label}${item[field] === 1 ? "" : "s"}</span></div>`).join("") : "<p>Sem dados.</p>"}
+    </div>
+  `;
+}
+
+function renderSeasonDrawer(season) {
+  const sessions = (profile.sessions || []).filter((session) => session.seasonId === season.id);
+  const ranking = buildOverall(sessions);
+  return `
+    <details class="season-drawer">
+      <summary>${escapeHtml(season.name)} ${season.finishedAt ? "(finalizada)" : ""}</summary>
+      ${season.awards ? renderSeasonAwards(season.awards) : ""}
+      ${renderCharts(sessions)}
+      <div class="leader-grid">
+        <div class="leader-box"><span>Artilharia</span><strong>${escapeHtml(ranking.topScorer.label)}</strong></div>
+        <div class="leader-box"><span>Assistencias</span><strong>${escapeHtml(ranking.topAssistant.label)}</strong></div>
+        <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(ranking.topHot.label)}</strong></div>
+        <div class="leader-box"><span>Nota PeladaFast ${renderInfoHint()}</span><strong>${escapeHtml(ranking.topMvp.label)}</strong></div>
+      </div>
+      <div class="data-list">
+        ${sessions.length ? sessions.slice().reverse().map(renderSessionCard).join("") : "<p>Nenhuma pelada nesta temporada.</p>"}
+      </div>
+    </details>
+  `;
+}
+
+function renderSeasonAwards(awards) {
+  return `
+    <div class="season-awards">
+      <p class="eyebrow">Premiacao da temporada</p>
+      <div class="leader-grid">
+        <div class="leader-box"><span>Artilheiro</span><strong>${escapeHtml(awards.topScorers.map((item) => `${item.name} (${item.value})`).join(", ") || "Sem gols")}</strong></div>
+        <div class="leader-box"><span>Assistente</span><strong>${escapeHtml(awards.topAssistants.map((item) => `${item.name} (${item.value})`).join(", ") || "Sem assistencias")}</strong></div>
+        <div class="leader-box"><span>Pe quente</span><strong>${escapeHtml(awards.topHot.map((item) => `${item.name} (${item.value})`).join(", ") || "Sem vitorias")}</strong></div>
+        <div class="leader-box"><span>Destaque ${renderInfoHint()}</span><strong>${escapeHtml(awards.topMvp.map((item) => `${item.name} (${item.value})`).join(", ") || "Sem notas")}</strong></div>
+      </div>
+    </div>
   `;
 }
 
@@ -2055,7 +2180,7 @@ function renderPublicPayload(payload, isPreview = false) {
       ${renderPublicRanking(payload.rankings.hot, "vitoria")}
     </section>
     <section class="data-card ranking-card">
-      <h3>Nota PeladaFast</h3>
+      <h3>Nota PeladaFast ${renderInfoHint()}</h3>
       ${renderPublicRanking(payload.rankings.mvp || [], "ponto")}
     </section>
     <section class="data-card champion-history">
@@ -2438,7 +2563,8 @@ function saveMatchSettings(event) {
   event.preventDefault();
   const durationMinutes = Math.max(1, Math.min(60, Number(els.durationInput.value) || DEFAULT_SETTINGS.durationMinutes));
   const goalLimit = Math.max(1, Math.min(20, Number(els.goalLimitInput.value) || DEFAULT_SETTINGS.goalLimit));
-  draft.settings = { durationMinutes, goalLimit };
+  const playersPerTeam = Math.max(1, Math.min(20, Number(els.playersPerTeamInput.value) || DEFAULT_SETTINGS.playersPerTeam));
+  draft.settings = { durationMinutes, goalLimit, playersPerTeam };
   render();
 }
 
@@ -2849,6 +2975,10 @@ els.dataGrid.addEventListener("click", (event) => {
   if (event.target.closest("[data-cancel-edit]")) {
     editingSessionId = null;
     renderData();
+  }
+
+  if (event.target.closest("[data-finish-season]")) {
+    finishCurrentSeason();
   }
 });
 

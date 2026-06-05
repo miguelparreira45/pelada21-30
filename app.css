@@ -364,7 +364,7 @@ p {
 }
 
 .settings-form {
-  grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
 }
 
 .teams-grid {
@@ -907,6 +907,7 @@ p {
 
 .data-card {
   padding: 16px;
+  min-width: 0;
 }
 
 .leader-grid {
@@ -943,6 +944,43 @@ p {
   border-radius: 8px;
   overflow: hidden;
   background: #0b0f0b;
+}
+
+.season-drawer {
+  margin-top: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  background: #0b0f0b;
+}
+
+.season-drawer > summary {
+  padding: 14px;
+  color: var(--green);
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.season-drawer > *:not(summary) {
+  margin: 14px;
+}
+
+.top5-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.general-top,
+.season-drawers {
+  grid-column: 1 / -1;
+}
+
+.season-awards {
+  padding: 12px;
+  border: 1px solid rgba(155, 227, 29, .35);
+  border-radius: 8px;
+  background: rgba(155, 227, 29, .08);
 }
 
 .chart-drawer summary {
@@ -1068,9 +1106,10 @@ p {
 
 .ranking-row {
   display: grid;
-  grid-template-columns: 34px minmax(96px, .9fr) minmax(90px, 1fr) 78px;
+  grid-template-columns: 34px minmax(0, .9fr) minmax(70px, 1fr) minmax(62px, auto);
   gap: 10px;
   align-items: center;
+  min-width: 0;
   min-height: 42px;
   padding: 8px;
   border: 1px solid var(--line);
@@ -1081,7 +1120,9 @@ p {
 }
 
 .ranking-row strong {
+  min-width: 0;
   color: var(--ink);
+  overflow-wrap: anywhere;
 }
 
 .ranking-row span:last-child {
@@ -1173,7 +1214,8 @@ p {
   .rating-row,
   .data-grid,
   .leader-grid,
-  .charts-grid {
+  .charts-grid,
+  .top5-grid {
     grid-template-columns: 1fr;
   }
 
