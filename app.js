@@ -1427,7 +1427,9 @@ function renderFinalSummary() {
   const summary = draft.finalSummary;
   els.finalView.innerHTML = `
     <section class="podium-card" id="podiumCard">
-      <img src="peladafast-logo.png" alt="PeladaFast">
+      <a class="logo-link" href="comercial.html" aria-label="Ir para o site comercial PeladaFast">
+        <img src="peladafast-logo.png" alt="PeladaFast">
+      </a>
       <p class="eyebrow">Pelada finalizada</p>
       <h2>${escapeHtml(summary.winnerTeam.label)}</h2>
       <div class="leader-grid">
