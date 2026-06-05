@@ -4,6 +4,19 @@ const TEAM_META = {
   green: { name: "Verde", color: "#1dc679" }
 };
 
+const TEAM_COLOR_OPTIONS = [
+  { id: "blue", name: "Azul", color: "#2f7dff" },
+  { id: "red", name: "Vermelho", color: "#ff4848" },
+  { id: "green", name: "Verde", color: "#1dc679" },
+  { id: "black", name: "Preto", color: "#111111" },
+  { id: "white", name: "Branco", color: "#f7f7f2" },
+  { id: "yellow", name: "Amarelo", color: "#ffd43b" },
+  { id: "orange", name: "Laranja", color: "#ff8a1f" },
+  { id: "purple", name: "Roxo", color: "#9b5cff" },
+  { id: "pink", name: "Rosa", color: "#ff5ca8" },
+  { id: "gray", name: "Cinza", color: "#9aa393" }
+];
+
 const STORE_KEY = "peladafast-store-v2";
 const DEFAULT_SETTINGS = { durationMinutes: 7, goalLimit: 2 };
 
@@ -197,6 +210,7 @@ function toSessionRow(session) {
     stats: session.stats,
     summary: {
       winnerTeam: session.winnerTeam,
+      teamColors: session.teamColors,
       topScorer: session.topScorer,
       topAssistant: session.topAssistant,
       topHot: session.topHot,
@@ -387,7 +401,7 @@ function recalculateImportedSession(session, targetProfile) {
   const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
   session.winnerTeam = {
     key: winnerTeamKey,
-    label: `${TEAM_META[winnerTeamKey].name} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+    label: `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
   };
   session.topScorer = topBy(session.stats, "goals", "Sem gols");
   session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
@@ -402,6 +416,7 @@ function newDraft() {
       red: { players: [] },
       green: { players: [] }
     },
+    teamColors: { blue: "blue", red: "red", green: "green" },
     playerStats: {},
     completedMatches: [],
     matchNumber: 0,
@@ -429,6 +444,7 @@ function ensureProfileDefaults(item) {
   }
   item.currentSeasonId ||= item.seasons[0].id;
   item.draft ||= newDraft();
+  item.draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
   item.draft.settings ||= { ...DEFAULT_SETTINGS };
   item.draft.seasonId ||= item.currentSeasonId;
   item.draft.completedMatches ||= [];
@@ -503,6 +519,28 @@ function showAppTab(tab) {
 
 function teamKeys() {
   return Object.keys(TEAM_META);
+}
+
+function teamColorId(teamKey, source = draft) {
+  return source?.teamColors?.[teamKey] || teamKey;
+}
+
+function teamMeta(teamKey, source = draft) {
+  return TEAM_COLOR_OPTIONS.find((item) => item.id === teamColorId(teamKey, source)) || TEAM_META[teamKey];
+}
+
+function teamName(teamKey, source = draft) {
+  return teamMeta(teamKey, source)?.name || TEAM_META[teamKey]?.name || "Time";
+}
+
+function teamColor(teamKey, source = draft) {
+  return teamMeta(teamKey, source)?.color || TEAM_META[teamKey]?.color || "#9be31d";
+}
+
+function renderTeamColorOptions(selectedId) {
+  return TEAM_COLOR_OPTIONS.map((option) =>
+    `<option value="${option.id}" ${option.id === selectedId ? "selected" : ""}>${option.name}</option>`
+  ).join("");
 }
 
 function activeTeamKeys() {
@@ -822,7 +860,7 @@ function renderSetup() {
   els.durationInput.value = draft.settings.durationMinutes;
   els.goalLimitInput.value = draft.settings.goalLimit;
   els.teamsGrid.innerHTML = teamKeys().map((key) => {
-    const meta = TEAM_META[key];
+    const meta = teamMeta(key);
     const players = draft.teams[key].players;
     const list = players.length
       ? players.map((ref) => `
@@ -837,6 +875,11 @@ function renderSetup() {
     return `
       <article class="team-card" style="--team-color: ${meta.color}">
         <div class="team-title"><span class="swatch"></span><h3>${meta.name}</h3></div>
+        <label class="team-color-picker">Cor do time
+          <select data-team-color="${key}" style="--selected-color: ${meta.color}">
+            ${renderTeamColorOptions(teamColorId(key))}
+          </select>
+        </label>
         <form class="player-form" data-team-form="${key}">
           <select name="player" ${availablePlayersForTeam(key).length ? "" : "disabled"}>
             ${renderPlayerOptions(key)}
@@ -1008,8 +1051,8 @@ function renderMatch() {
   const match = draft.currentMatch;
   const [left, right] = match.playing;
   els.matchLabel.textContent = `Partida ${draft.matchNumber}`;
-  els.leftPanel.style.setProperty("--team-color", TEAM_META[left].color);
-  els.rightPanel.style.setProperty("--team-color", TEAM_META[right].color);
+  els.leftPanel.style.setProperty("--team-color", teamColor(left));
+  els.rightPanel.style.setProperty("--team-color", teamColor(right));
   els.leftPanel.innerHTML = renderTeamPanel(left);
   els.rightPanel.innerHTML = renderTeamPanel(right);
   els.timer.textContent = formatClock(match.remaining);
@@ -1024,7 +1067,7 @@ function renderMatch() {
 }
 
 function renderTeamPanel(teamKey) {
-  const meta = TEAM_META[teamKey];
+  const meta = teamMeta(teamKey);
   const score = draft.currentMatch.score[teamKey];
   const players = matchRoster(teamKey).map((ref) => {
     const isGuest = !draft.teams[teamKey].players.includes(ref);
@@ -1061,8 +1104,8 @@ function renderLineupTeam(teamKey) {
   const guests = draft.currentMatch.guests[teamKey] || [];
   const options = availableGuestPlayers(teamKey);
   return `
-    <article class="lineup-card" style="--team-color: ${TEAM_META[teamKey].color}">
-      <h3>${TEAM_META[teamKey].name}</h3>
+    <article class="lineup-card" style="--team-color: ${teamColor(teamKey)}">
+      <h3>${teamName(teamKey)}</h3>
       <div class="lineup-list">
         ${base.map((ref) => `<span class="mini-pill ${playerType(ref)}">${escapeHtml(playerDisplayName(ref))}</span>`).join("")}
         ${guests.map((ref) => `
@@ -1077,7 +1120,7 @@ function renderLineupTeam(teamKey) {
           <select name="guest" ${options.length ? "" : "disabled"}>
             ${options.length ? `<option value="">Escolha jogador</option>` + options.map((player) => {
               const baseTeam = baseTeamOfPlayer(player.id);
-              return `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${TEAM_META[baseTeam]?.name || "fora"})</option>`;
+              return `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${baseTeam ? teamName(baseTeam) : "fora"})</option>`;
             }).join("") : `<option value="">Sem jogadores disponiveis</option>`}
           </select>
         </label>
@@ -1088,7 +1131,7 @@ function renderLineupTeam(teamKey) {
 }
 
 function renderBench() {
-  const bench = TEAM_META[benchTeamKey()];
+  const bench = teamMeta(benchTeamKey());
   els.benchStrip.innerHTML = `
     <span class="bench-name">Time de fora</span>
     <span class="bench-team"><span class="swatch" style="background: ${bench.color}"></span>${bench.name}</span>
@@ -1098,7 +1141,7 @@ function renderBench() {
 function renderGoalForm() {
   const active = activeTeamKeys();
   const canRegisterGoal = Boolean(draft.currentMatch?.isRunning || draft.currentMatch?.isTimeUp);
-  els.goalTeam.innerHTML = active.map((key) => `<option value="${key}">${TEAM_META[key].name}</option>`).join("");
+  els.goalTeam.innerHTML = active.map((key) => `<option value="${key}">${teamName(key)}</option>`).join("");
   if (!active.includes(els.goalTeam.value)) els.goalTeam.value = active[0];
   fillPlayerOptions();
   els.goalForm.querySelectorAll("select, button").forEach((field) => {
@@ -1128,7 +1171,7 @@ function renderStats() {
   els.runningSummary.textContent = `${totalGoals} gol${totalGoals === 1 ? "" : "s"} nesta pelada.`;
   els.statsList.innerHTML = stats.map((item) => `
     <div class="stat-row">
-      <strong>${escapeHtml(item.name)} <small>(${TEAM_META[item.teamKey].name})</small></strong>
+      <strong>${escapeHtml(item.name)} <small>(${teamName(item.teamKey)})</small></strong>
       <span>${item.goals} G / ${item.assists} A / ${item.wins} V</span>
     </div>
   `).join("");
@@ -1136,8 +1179,8 @@ function renderStats() {
 
 function renderEnded() {
   const match = draft.finishedMatch;
-  const scoreLine = match.playing.map((key) => `${TEAM_META[key].name} ${match.score[key]}`).join(" x ");
-  const winner = match.winner ? TEAM_META[match.winner].name : null;
+  const scoreLine = match.playing.map((key) => `${teamName(key)} ${match.score[key]}`).join(" x ");
+  const winner = match.winner ? teamName(match.winner) : null;
   els.resultBand.innerHTML = `
     <p class="eyebrow">Partida ${draft.matchNumber} encerrada</p>
     <h2>${scoreLine}</h2>
@@ -1151,7 +1194,7 @@ function renderEnded() {
     els.winnerChoice.innerHTML = `
       <h3>Quem fica?</h3>
       <div class="choice-buttons">
-        ${match.playing.map((key) => `<button class="secondary-action" data-winner="${key}">${TEAM_META[key].name}</button>`).join("")}
+        ${match.playing.map((key) => `<button class="secondary-action" data-winner="${key}">${teamName(key)}</button>`).join("")}
       </div>
     `;
   } else {
@@ -1319,6 +1362,7 @@ function buildSessionSummary() {
   });
 
   const winnerTeamKey = teamKeys().sort((a, b) => winsByTeam[b] - winsByTeam[a])[0];
+  const teamColors = structuredClone(draft.teamColors || { blue: "blue", red: "red", green: "green" });
   const topScorer = topBy(stats, "goals", "Sem gols");
   const topAssistant = topBy(stats, "assists", "Sem assistencias");
   const topHot = topBy(stats, "wins", "Sem vitorias");
@@ -1329,13 +1373,14 @@ function buildSessionSummary() {
     seasonId: season?.id || null,
     seasonName: season?.name || "Sem temporada",
     settings: { ...draft.settings },
+    teamColors,
     teams: structuredClone(draft.teams),
     matches: structuredClone(draft.completedMatches),
     stats: structuredClone(stats),
     winsByTeam,
     winnerTeam: {
       key: winnerTeamKey,
-      label: `${TEAM_META[winnerTeamKey].name} (${winsByTeam[winnerTeamKey]} vitoria${winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+      label: `${teamName(winnerTeamKey, { teamColors })} (${winsByTeam[winnerTeamKey]} vitoria${winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
     },
     topScorer,
     topAssistant,
@@ -1370,13 +1415,13 @@ function buildReport(summary) {
     "Jogadores:"
   ];
   summary.stats
-    .sort((a, b) => TEAM_META[a.teamKey].name.localeCompare(TEAM_META[b.teamKey].name) || a.name.localeCompare(b.name))
-    .forEach((item) => lines.push(`- ${item.name} (${TEAM_META[item.teamKey].name}): ${item.goals} gol(s), ${item.assists} assistencia(s), ${item.wins} vitoria(s)`));
+    .sort((a, b) => teamName(a.teamKey, summary).localeCompare(teamName(b.teamKey, summary)) || a.name.localeCompare(b.name))
+    .forEach((item) => lines.push(`- ${item.name} (${teamName(item.teamKey, summary)}): ${item.goals} gol(s), ${item.assists} assistencia(s), ${item.wins} vitoria(s)`));
 
   lines.push("", "Partidas:");
   summary.matches.forEach((match, index) => {
-    const score = match.playing.map((key) => `${TEAM_META[key].name} ${match.score[key]}`).join(" x ");
-    lines.push(`- Jogo ${index + 1}: ${score}. Vencedor: ${TEAM_META[match.winner].name}`);
+    const score = match.playing.map((key) => `${teamName(key, summary)} ${match.score[key]}`).join(" x ");
+    lines.push(`- Jogo ${index + 1}: ${score}. Vencedor: ${teamName(match.winner, summary)}`);
   });
 
   return lines.join("\n");
@@ -1478,7 +1523,7 @@ function buildSharePayload() {
     },
     championTeam: {
       key: championValue ? championKey : "",
-      name: championValue ? TEAM_META[championKey].name : "Sem campeao",
+      name: championValue ? teamName(championKey, { teamColors: draft?.teamColors }) : "Sem campeao",
       wins: championValue
     },
     rankings,
@@ -1490,7 +1535,7 @@ function buildSharePayload() {
         id: session.id,
         date: session.date,
         teamKey: session.winnerTeam.key,
-        teamName: TEAM_META[session.winnerTeam.key]?.name || session.winnerTeam.label,
+        teamName: teamName(session.winnerTeam.key, session) || session.winnerTeam.label,
         label: session.winnerTeam.label,
         players: championPlayers(session)
       }))
@@ -1710,7 +1755,7 @@ function filteredSessions(tab) {
 function renderSessionCard(session) {
   const date = new Date(session.date).toLocaleString("pt-BR");
   const matches = session.matches.map((match, index) => {
-    const score = match.playing.map((key) => `${TEAM_META[key].name} ${match.score[key]}`).join(" x ");
+    const score = match.playing.map((key) => `${teamName(key, session)} ${match.score[key]}`).join(" x ");
     return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score}</span></div>`;
   }).join("");
 
@@ -1736,7 +1781,7 @@ function renderSessionEditor(sessionId) {
 
   const matches = session.matches.map((match, index) => {
     const scores = match.playing.map((teamKey) => `
-      <label>${TEAM_META[teamKey].name}
+      <label>${teamName(teamKey, session)}
         <input name="match_${index}_score_${teamKey}" type="number" min="0" max="99" value="${match.score[teamKey] || 0}">
       </label>
     `).join("");
@@ -1747,7 +1792,7 @@ function renderSessionEditor(sessionId) {
           ${scores}
           <label>Vencedor
             <select name="match_${index}_winner">
-              ${match.playing.map((teamKey) => `<option value="${teamKey}" ${match.winner === teamKey ? "selected" : ""}>${TEAM_META[teamKey].name}</option>`).join("")}
+              ${match.playing.map((teamKey) => `<option value="${teamKey}" ${match.winner === teamKey ? "selected" : ""}>${teamName(teamKey, session)}</option>`).join("")}
             </select>
           </label>
         </div>
@@ -1757,10 +1802,10 @@ function renderSessionEditor(sessionId) {
 
   const stats = session.stats
     .slice()
-    .sort((a, b) => TEAM_META[a.teamKey].name.localeCompare(TEAM_META[b.teamKey].name) || a.name.localeCompare(b.name))
+    .sort((a, b) => teamName(a.teamKey, session).localeCompare(teamName(b.teamKey, session)) || a.name.localeCompare(b.name))
     .map((item) => `
       <div class="editor-player">
-        <strong>${escapeHtml(item.name)} <small>${TEAM_META[item.teamKey].name}</small></strong>
+        <strong>${escapeHtml(item.name)} <small>${teamName(item.teamKey, session)}</small></strong>
         <label>Gols<input name="stat_${item.id}_goals" type="number" min="0" max="999" value="${item.goals || 0}"></label>
         <label>Assist.<input name="stat_${item.id}_assists" type="number" min="0" max="999" value="${item.assists || 0}"></label>
       </div>
@@ -1881,7 +1926,7 @@ function recalculateSession(session) {
   const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
   session.winnerTeam = {
     key: winnerTeamKey,
-    label: `${TEAM_META[winnerTeamKey].name} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
+    label: `${teamName(winnerTeamKey, session)} (${session.winsByTeam[winnerTeamKey]} vitoria${session.winsByTeam[winnerTeamKey] === 1 ? "" : "s"})`
   };
   session.topScorer = topBy(session.stats, "goals", "Sem gols");
   session.topAssistant = topBy(session.stats, "assists", "Sem assistencias");
@@ -1892,9 +1937,11 @@ function recalculateSession(session) {
 function resetDraft() {
   clearInterval(timerId);
   const settings = draft?.settings || { ...DEFAULT_SETTINGS };
+  const teamColors = draft?.teamColors || { blue: "blue", red: "red", green: "green" };
   const seasonId = profile.currentSeasonId;
   draft = newDraft();
   draft.settings = { ...settings };
+  draft.teamColors = { ...teamColors };
   draft.seasonId = seasonId;
   profile.draft = draft;
   saveStore();
@@ -1964,7 +2011,7 @@ function celebrateGoal(teamKey) {
     score.classList.add("bump");
     setTimeout(() => score.classList.remove("bump"), 350);
   }
-  confetti(TEAM_META[teamKey].color);
+  confetti(teamColor(teamKey));
 }
 
 function confetti(color) {
@@ -2049,6 +2096,15 @@ els.teamsGrid.addEventListener("click", (event) => {
   const ref = button.dataset.player;
   draft.teams[teamKey].players = draft.teams[teamKey].players.filter((player) => player !== ref);
   delete draft.playerStats[playerStatId(ref)];
+  render();
+});
+
+els.teamsGrid.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-team-color]");
+  if (!select) return;
+  const teamKey = select.dataset.teamColor;
+  draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
+  draft.teamColors[teamKey] = select.value;
   render();
 });
 

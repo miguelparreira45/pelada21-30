@@ -373,6 +373,14 @@ p {
   gap: 10px;
 }
 
+.team-color-picker {
+  margin-top: 12px;
+}
+
+.team-color-picker select {
+  border-left: 8px solid var(--selected-color);
+}
+
 .swatch {
   width: 14px;
   height: 14px;
