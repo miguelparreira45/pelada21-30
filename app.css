@@ -1588,9 +1588,19 @@ p {
     font-size: clamp(18px, 5vw, 30px);
   }
 
-  .match-view.full-score .players-mini,
-  .match-view.full-score .quick-goal {
+  .match-view.full-score .players-mini {
     display: none;
+  }
+
+  .match-view.full-score .quick-goal {
+    display: inline-flex;
+    width: auto;
+    min-height: 36px;
+    margin: 6px 0;
+    padding: 0 14px;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
   }
 
   .match-view.full-score .timer {

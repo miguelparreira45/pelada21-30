@@ -2784,67 +2784,91 @@ async function exportStravaImage() {
   if (!draft.finalSummary) return;
   const summary = draft.finalSummary;
   const canvas = document.createElement("canvas");
-  canvas.width = 1080;
-  canvas.height = 1350;
+  canvas.width = 1600;
+  canvas.height = 700;
   const ctx = canvas.getContext("2d");
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.strokeStyle = "rgba(155, 227, 29, .75)";
-  ctx.lineWidth = 6;
-  roundRect(ctx, 54, 54, 972, 1242, 42);
-  ctx.stroke();
+  const logo = await loadImage("peladafast-logo.png").catch(() => null);
   ctx.fillStyle = "rgba(7, 16, 6, .86)";
-  roundRect(ctx, 72, 72, 936, 1206, 34);
+  roundRect(ctx, 34, 34, 1532, 632, 40);
   ctx.fill();
+  ctx.strokeStyle = "rgba(155, 227, 29, .75)";
+  ctx.lineWidth = 5;
+  roundRect(ctx, 34, 34, 1532, 632, 40);
+  ctx.stroke();
+  if (logo) {
+    ctx.drawImage(logo, 70, 62, 290, 116);
+  } else {
+    ctx.fillStyle = "#9be31d";
+    ctx.font = "900 42px Arial";
+    ctx.fillText("PELADAFAST", 78, 130);
+  }
   ctx.fillStyle = "#9be31d";
-  ctx.font = "900 42px Arial";
-  ctx.fillText("PELADAFAST", 104, 142);
+  ctx.font = "900 20px Arial";
+  ctx.fillText("@PELADAFAST", 1260, 96);
+  ctx.strokeStyle = "rgba(155, 227, 29, .85)";
+  ctx.lineWidth = 3;
+  ctx.beginPath();
+  ctx.arc(1236, 89, 16, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.font = "900 18px Arial";
+  ctx.fillText("@", 1228, 96);
   ctx.fillStyle = "#f5f7f2";
-  ctx.font = "900 56px Arial";
-  wrapCanvasText(ctx, "Resumo da rodada", 104, 230, 850, 62);
-  drawStravaMetric(ctx, "Time vencedor", summary.winnerTeam.label, 104, 330, 872);
-  drawStravaMetric(ctx, "Artilheiro", summary.topScorer.label, 104, 500, 410);
-  drawStravaMetric(ctx, "Assistente", summary.topAssistant.label, 566, 500, 410);
-  drawStravaMetric(ctx, "Craque da rodada", summary.topMvp?.label || "Sem destaque", 104, 670, 872);
+  ctx.font = "900 46px Arial";
+  wrapCanvasText(ctx, "Resumo da rodada", 78, 238, 500, 52);
+  drawStravaMetric(ctx, "Time vencedor", summary.winnerTeam.label, 78, 340, 520, 124);
+  drawStravaMetric(ctx, "Artilheiro", summary.topScorer.label, 632, 230, 420, 118);
+  drawStravaMetric(ctx, "Assistente", summary.topAssistant.label, 1090, 230, 420, 118);
+  drawStravaMetric(ctx, "Craque da rodada", summary.topMvp?.label || "Sem destaque", 632, 388, 878, 118);
   ctx.fillStyle = "#9be31d";
-  ctx.font = "900 30px Arial";
-  ctx.fillText("Elenco campeao", 104, 855);
+  ctx.font = "900 25px Arial";
+  ctx.fillText("ELENCO CAMPEAO", 78, 520);
   const winnerPlayers = summary.winnerTeam.key ? (summary.teams?.[summary.winnerTeam.key]?.players || []) : [];
-  let x = 104;
-  let y = 900;
-  winnerPlayers.slice(0, 14).forEach((ref) => {
+  let x = 78;
+  let y = 548;
+  winnerPlayers.slice(0, 12).forEach((ref) => {
     const name = playerDisplayName(ref);
-    ctx.font = "800 24px Arial";
-    const width = Math.min(300, ctx.measureText(name).width + 34);
-    if (x + width > 976) {
-      x = 104;
-      y += 58;
+    ctx.font = "800 21px Arial";
+    const width = Math.min(230, ctx.measureText(name).width + 30);
+    if (x + width > 1518) {
+      x = 78;
+      y += 46;
     }
     ctx.fillStyle = "rgba(245, 247, 242, .12)";
-    roundRect(ctx, x, y, width, 42, 18);
+    roundRect(ctx, x, y, width, 34, 16);
     ctx.fill();
     ctx.fillStyle = "#f5f7f2";
-    ctx.fillText(name, x + 17, y + 28);
+    ctx.fillText(name, x + 15, y + 23);
     x += width + 12;
   });
   ctx.fillStyle = "#9aa393";
-  ctx.font = "800 24px Arial";
-  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 104, 1212);
+  ctx.font = "800 20px Arial";
+  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 1260, 625);
   const link = document.createElement("a");
   link.download = `peladafast-resumo-transparente-${Date.now()}.png`;
   link.href = canvas.toDataURL("image/png");
   link.click();
 }
 
-function drawStravaMetric(ctx, title, value, x, y, width) {
+function drawStravaMetric(ctx, title, value, x, y, width, height = 132) {
   ctx.fillStyle = "rgba(155, 227, 29, .13)";
-  roundRect(ctx, x, y - 58, width, 132, 24);
+  roundRect(ctx, x, y - 58, width, height, 24);
   ctx.fill();
   ctx.fillStyle = "#9be31d";
-  ctx.font = "900 24px Arial";
+  ctx.font = "900 20px Arial";
   ctx.fillText(title.toUpperCase(), x + 24, y - 18);
   ctx.fillStyle = "#f5f7f2";
-  ctx.font = "900 34px Arial";
-  wrapCanvasText(ctx, value, x + 24, y + 30, width - 48, 38);
+  ctx.font = "900 30px Arial";
+  wrapCanvasText(ctx, value, x + 24, y + 28, width - 48, 34);
+}
+
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = reject;
+    image.src = src;
+  });
 }
 
 function roundRect(ctx, x, y, width, height, radius) {
