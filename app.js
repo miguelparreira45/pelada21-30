@@ -1,8 +1,14 @@
 const TEAM_META = {
   blue: { name: "Azul", color: "#2f7dff" },
   red: { name: "Vermelho", color: "#ff4848" },
-  green: { name: "Verde", color: "#1dc679" }
+  green: { name: "Verde", color: "#1dc679" },
+  team4: { name: "Time 4", color: "#ffd43b" },
+  team5: { name: "Time 5", color: "#ff8a1f" },
+  team6: { name: "Time 6", color: "#9b5cff" }
 };
+
+const TEAM_ORDER = ["blue", "red", "green", "team4", "team5", "team6"];
+const DEFAULT_TEAM_COLOR_IDS = { blue: "blue", red: "red", green: "green", team4: "yellow", team5: "orange", team6: "purple" };
 
 const TEAM_COLOR_OPTIONS = [
   { id: "blue", name: "Azul", color: "#2f7dff" },
@@ -18,7 +24,14 @@ const TEAM_COLOR_OPTIONS = [
 ];
 
 const STORE_KEY = "peladafast-store-v2";
-const DEFAULT_SETTINGS = { durationMinutes: 7, goalLimit: 2, playersPerTeam: 5 };
+const DEFAULT_SETTINGS = {
+  durationMinutes: 7,
+  goalLimit: 2,
+  playersPerTeam: 5,
+  teamCount: 3,
+  teamIdentity: "color",
+  drawTieRule: "decide-stay"
+};
 
 let store = loadStore();
 let profile = null;
@@ -69,6 +82,9 @@ const els = {
   durationInput: document.querySelector("#durationInput"),
   goalLimitInput: document.querySelector("#goalLimitInput"),
   playersPerTeamInput: document.querySelector("#playersPerTeamInput"),
+  teamCountInput: document.querySelector("#teamCountInput"),
+  teamIdentityInput: document.querySelector("#teamIdentityInput"),
+  drawTieRuleInput: document.querySelector("#drawTieRuleInput"),
   leftPanel: document.querySelector("#leftPanel"),
   rightPanel: document.querySelector("#rightPanel"),
   lineupCheck: document.querySelector("#lineupCheck"),
@@ -232,6 +248,7 @@ function toSessionRow(session) {
     summary: {
       winnerTeam: session.winnerTeam,
       teamColors: session.teamColors,
+      teamNames: session.teamNames,
       topScorer: session.topScorer,
       topAssistant: session.topAssistant,
       topHot: session.topHot,
@@ -400,7 +417,7 @@ function recalculateImportedSession(session, targetProfile) {
     const player = targetProfile.players.find((entry) => entry.id === item.id || entry.id === item.playerId);
     if (player) item.name = `${player.firstName} ${player.lastName}`.trim();
   });
-  session.winsByTeam = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  session.winsByTeam = Object.fromEntries(teamKeys(session).map((key) => [key, 0]));
   session.matches.forEach((match) => {
     if (!match.winner) return;
     session.winsByTeam[match.winner] += 1;
@@ -422,7 +439,7 @@ function recalculateImportedSession(session, targetProfile) {
       statsById[id].wins += 1;
     });
   });
-  const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  const winnerTeamKey = teamKeys(session).sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
   const hasTeamWinner = session.winsByTeam[winnerTeamKey] > 0;
   session.winnerTeam = {
     key: hasTeamWinner ? winnerTeamKey : "",
@@ -440,12 +457,10 @@ function recalculateImportedSession(session, targetProfile) {
 
 function newDraft() {
   return {
-    teams: {
-      blue: { players: [] },
-      red: { players: [] },
-      green: { players: [] }
-    },
-    teamColors: { blue: "blue", red: "red", green: "green" },
+    teams: Object.fromEntries(TEAM_ORDER.slice(0, DEFAULT_SETTINGS.teamCount).map((key) => [key, { players: [] }])),
+    teamColors: Object.fromEntries(TEAM_ORDER.slice(0, DEFAULT_SETTINGS.teamCount).map((key) => [key, DEFAULT_TEAM_COLOR_IDS[key] || key])),
+    teamNames: {},
+    teamStreaks: {},
     playerStats: {},
     completedMatches: [],
     matchNumber: 0,
@@ -470,8 +485,16 @@ function ensureProfileDefaults(item) {
   }
   item.draft ||= newDraft();
   item.draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
+  item.draft.teamNames ||= {};
+  item.draft.teamStreaks ||= {};
   item.draft.settings ||= { ...DEFAULT_SETTINGS };
   item.draft.settings = { ...DEFAULT_SETTINGS, ...item.draft.settings };
+  TEAM_ORDER.slice(0, activeTeamCount(item.draft)).forEach((key) => {
+    item.draft.teams ||= {};
+    item.draft.teams[key] ||= { players: [] };
+    item.draft.teamColors[key] ||= DEFAULT_TEAM_COLOR_IDS[key] || key;
+    item.draft.teamStreaks[key] ||= 0;
+  });
   item.draft.seasonId = item.currentSeasonId;
   item.draft.completedMatches ||= [];
   item.draft.playerStats ||= {};
@@ -560,8 +583,32 @@ function showAppTab(tab) {
   if (tab === "share") renderShare();
 }
 
-function teamKeys() {
-  return Object.keys(TEAM_META);
+function activeTeamCount(source = draft) {
+  return Math.max(3, Math.min(6, Number(source?.settings?.teamCount) || DEFAULT_SETTINGS.teamCount));
+}
+
+function teamKeys(source = draft) {
+  if (source?.teams) {
+    const keys = Object.keys(source.teams);
+    if (keys.length) return keys.sort((a, b) => TEAM_ORDER.indexOf(a) - TEAM_ORDER.indexOf(b));
+  }
+  return TEAM_ORDER.slice(0, activeTeamCount(source));
+}
+
+function ensureDraftTeams() {
+  const keys = TEAM_ORDER.slice(0, activeTeamCount());
+  draft.teams ||= {};
+  draft.teamColors ||= {};
+  draft.teamNames ||= {};
+  draft.teamStreaks ||= {};
+  keys.forEach((key) => {
+    draft.teams[key] ||= { players: [] };
+    draft.teamColors[key] ||= DEFAULT_TEAM_COLOR_IDS[key] || key;
+    draft.teamStreaks[key] ||= 0;
+  });
+  Object.keys(draft.teams).forEach((key) => {
+    if (!keys.includes(key)) delete draft.teams[key];
+  });
 }
 
 function teamColorId(teamKey, source = draft) {
@@ -573,7 +620,7 @@ function teamMeta(teamKey, source = draft) {
 }
 
 function teamName(teamKey, source = draft) {
-  return teamMeta(teamKey, source)?.name || TEAM_META[teamKey]?.name || "Time";
+  return source?.teamNames?.[teamKey] || teamMeta(teamKey, source)?.name || TEAM_META[teamKey]?.name || "Time";
 }
 
 function teamColor(teamKey, source = draft) {
@@ -897,10 +944,14 @@ function render() {
 }
 
 function renderSetup() {
+  ensureDraftTeams();
   renderSeasonControls();
   els.durationInput.value = draft.settings.durationMinutes;
   els.goalLimitInput.value = draft.settings.goalLimit;
   els.playersPerTeamInput.value = draft.settings.playersPerTeam || DEFAULT_SETTINGS.playersPerTeam;
+  els.teamCountInput.value = activeTeamCount();
+  els.teamIdentityInput.value = draft.settings.teamIdentity || DEFAULT_SETTINGS.teamIdentity;
+  els.drawTieRuleInput.value = draft.settings.drawTieRule || DEFAULT_SETTINGS.drawTieRule;
   els.teamsGrid.innerHTML = teamKeys().map((key) => {
     const meta = teamMeta(key);
     const players = draft.teams[key].players;
@@ -916,7 +967,10 @@ function renderSetup() {
 
     return `
       <article class="team-card" style="--team-color: ${meta.color}">
-        <div class="team-title"><span class="swatch"></span><h3>${meta.name}</h3></div>
+        <div class="team-title"><span class="swatch"></span><h3>${escapeHtml(teamName(key))}</h3></div>
+        <label class="team-name-field ${draft.settings.teamIdentity === "name" ? "" : "hidden"}">Nome do time
+          <input data-team-name="${key}" value="${escapeHtml(draft.teamNames?.[key] || meta.name)}">
+        </label>
         <label class="team-color-picker">Cor do time
           <select data-team-color="${key}" style="--selected-color: ${meta.color}">
             ${renderTeamColorOptions(teamColorId(key))}
@@ -1262,10 +1316,10 @@ function renderLineupTeam(teamKey) {
 }
 
 function renderBench() {
-  const bench = teamMeta(benchTeamKey());
+  const queue = draft.currentMatch?.benchQueue || draft.finishedMatch?.benchQueue || [benchTeamKey()].filter(Boolean);
   els.benchStrip.innerHTML = `
-    <span class="bench-name">Time de fora</span>
-    <span class="bench-team"><span class="swatch" style="background: ${bench.color}"></span>${bench.name}</span>
+    <span class="bench-name">Fila de fora</span>
+    ${queue.length ? queue.map((teamKey, index) => `<span class="bench-team"><span class="swatch" style="background: ${teamColor(teamKey)}"></span>${index + 1}. ${escapeHtml(teamName(teamKey))}</span>`).join("") : "<span class=\"bench-team\">Sem banco</span>"}
   `;
 }
 
@@ -1376,14 +1430,19 @@ function renderEnded() {
   const scoreLine = match.playing.map((key) => `${teamName(key, match)} ${match.score[key]}`).join(" x ");
   const winner = match.winner ? teamName(match.winner, match) : null;
   const king = match.kingTable ? teamName(match.stayTeam, match) : null;
+  const tieText = match.tieAction === "exit-both"
+    ? "Empate: saem os dois times e entram os proximos da fila."
+    : match.tieAction === "longest-out"
+      ? `Empate: ${teamName(match.stayTeam, match)} fica em campo. Sai quem estava ha mais tempo.`
+      : "Empate no tempo. Escolha quem fica ou defina um vencedor.";
   els.resultBand.innerHTML = `
     <p class="eyebrow">Partida ${draft.matchNumber} encerrada</p>
     <h2>${scoreLine}</h2>
-    <p>${winner ? `Vencedor: ${winner}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : king ? `Rei da mesa: ${king} permanece em campo sem contar vitoria.` : "Empate no tempo. Escolha rei da mesa ou defina um vencedor."}</p>
+    <p>${winner ? `Vencedor: ${winner}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : king ? `${king} permanece em campo sem contar vitoria.` : tieText}</p>
     ${renderMatchHistoryPreview(match)}
   `;
 
-  const needsResolution = !match.winner && !match.kingTable;
+  const needsResolution = !match.winner && !match.kingTable && !match.tieResolved;
   els.winnerChoice.classList.toggle("hidden", !needsResolution);
   els.nextMatch.disabled = needsResolution;
   els.finishSession.disabled = needsResolution;
@@ -1391,9 +1450,9 @@ function renderEnded() {
     els.winnerChoice.innerHTML = `
       <h3>Como resolver o empate?</h3>
       <div class="choice-buttons">
-        <button class="primary-action" data-king-table="${match.enteredTeam || match.playing[1]}">Rei da mesa: ${teamName(match.enteredTeam || match.playing[1], match)}</button>
+        ${match.playing.map((key) => `<button class="primary-action" data-king-table="${key}">Fica em campo: ${teamName(key, match)}</button>`).join("")}
       </div>
-      <p>Rei da mesa mantem em campo quem veio da de fora, mas nao soma vitoria.</p>
+      <p>Quem fica em campo nao soma vitoria quando a partida termina empatada.</p>
       <label class="overtime-choice">
         <input type="checkbox" id="overtimeGoalChoice">
         Teve gol apos o tempo regulamentar
@@ -1416,7 +1475,11 @@ function renderMatchHistoryPreview(extraMatch = null) {
       <h3>Historico da pelada</h3>
       ${matches.map((item, index) => {
         const score = item.playing.map((key) => `${teamName(key, item)} ${item.score[key]}`).join(" x ");
-        const result = item.winner ? `Vencedor: ${teamName(item.winner, item)}` : `Rei da mesa: ${teamName(item.stayTeam, item)}`;
+        const result = item.winner
+          ? `Vencedor: ${teamName(item.winner, item)}`
+          : item.tieAction === "exit-both"
+            ? "Empate: sairam os dois"
+            : `Ficou: ${teamName(item.stayTeam, item)}`;
         return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${result}</span></div>`;
       }).join("")}
     </div>
@@ -1443,12 +1506,14 @@ function renderFinalSummary() {
     <div class="next-actions">
       <button class="primary-action big" id="freshSession">Nova pelada</button>
       <button class="primary-action" id="exportPodiumImage">Imagem WhatsApp</button>
+      <button class="primary-action" id="exportStravaImage">Resumo transparente</button>
       <button class="secondary-action" id="copyFinalReport">Copiar resumo</button>
       <button class="secondary-action" id="openDataFromFinal">Ver dados</button>
     </div>
   `;
   document.querySelector("#freshSession").addEventListener("click", resetDraft);
   document.querySelector("#exportPodiumImage").addEventListener("click", exportPodiumImage);
+  document.querySelector("#exportStravaImage").addEventListener("click", exportStravaImage);
   document.querySelector("#copyFinalReport").addEventListener("click", () => {
     navigator.clipboard?.writeText(summary.report || "").then(() => alert("Resumo copiado."));
   });
@@ -1472,8 +1537,9 @@ function startTimer() {
 
 function startFirstMatch() {
   draft.seasonId = profile.currentSeasonId;
+  ensureDraftTeams();
   const order = shuffle(teamKeys());
-  startMatch([order[0], order[1]], order[2]);
+  startMatch([order[0], order[1]], order.slice(2));
 }
 
 function balanceTeamsByPerformance() {
@@ -1561,12 +1627,20 @@ function playerBadges(stats) {
 
 function startMatch(playing, bench) {
   draft.matchNumber += 1;
+  const benchQueue = Array.isArray(bench) ? bench : [bench].filter(Boolean);
   const durationMinutes = Number(draft.settings.durationMinutes) || DEFAULT_SETTINGS.durationMinutes;
   const goalLimit = Number(draft.settings.goalLimit) || DEFAULT_SETTINGS.goalLimit;
+  draft.teamStreaks ||= {};
+  teamKeys().forEach((key) => {
+    draft.teamStreaks[key] = playing.includes(key) ? (Number(draft.teamStreaks[key]) || 0) + 1 : 0;
+  });
   draft.currentMatch = {
     playing,
-    bench,
+    bench: benchQueue[0] || "",
+    benchQueue,
     enteredTeam: playing[1],
+    teamColors: structuredClone(draft.teamColors || {}),
+    teamNames: structuredClone(draft.teamNames || {}),
     score: { [playing[0]]: 0, [playing[1]]: 0 },
     guests: { [playing[0]]: [], [playing[1]]: [] },
     out: { [playing[0]]: [], [playing[1]]: [] },
@@ -1574,6 +1648,7 @@ function startMatch(playing, bench) {
     remaining: durationMinutes * 60,
     durationMinutes,
     goalLimit,
+    teamStreaks: { ...draft.teamStreaks },
     isRunning: false,
     isTimeUp: false,
     startedAt: new Date().toISOString()
@@ -1677,11 +1752,30 @@ function finishCurrentMatch(reason, forcedWinner = null) {
   const match = draft.currentMatch;
   const [a, b] = match.playing;
   const winner = forcedWinner || (match.score[a] > match.score[b] ? a : match.score[b] > match.score[a] ? b : null);
+  const tieRule = draft.settings.drawTieRule || DEFAULT_SETTINGS.drawTieRule;
+  const isTie = !winner;
+  let tieAction = "";
+  let stayTeam = "";
+  let tieResolved = false;
+  if (isTie && reason === "time" && activeTeamCount() > 3) {
+    if (tieRule === "exit-both") {
+      tieAction = "exit-both";
+      tieResolved = true;
+    } else if (tieRule === "longest-out") {
+      const streaks = match.teamStreaks || draft.teamStreaks || {};
+      stayTeam = (Number(streaks[a]) || 0) <= (Number(streaks[b]) || 0) ? a : b;
+      tieAction = "longest-out";
+      tieResolved = true;
+    }
+  }
 
   draft.finishedMatch = {
     ...match,
     reason,
     winner,
+    tieAction,
+    tieResolved,
+    stayTeam,
     endedAt: new Date().toISOString()
   };
   draft.currentMatch = null;
@@ -1724,7 +1818,7 @@ function chooseKingTable(teamKey) {
 }
 
 function storeFinishedMatch() {
-  if ((!draft.finishedMatch?.winner && !draft.finishedMatch?.kingTable) || draft.finishedMatch.stored) return;
+  if ((!draft.finishedMatch?.winner && !draft.finishedMatch?.kingTable && !draft.finishedMatch?.tieResolved) || draft.finishedMatch.stored) return;
   const match = { ...draft.finishedMatch, stored: true };
   draft.completedMatches.push(match);
   if (match.winner) {
@@ -1738,10 +1832,23 @@ function storeFinishedMatch() {
 
 function startNextMatch() {
   storeFinishedMatch();
-  const stay = draft.finishedMatch.winner || draft.finishedMatch.stayTeam;
-  const entering = draft.finishedMatch.bench;
-  const leaving = draft.finishedMatch.playing.find((teamKey) => teamKey !== stay);
-  startMatch([stay, entering], leaving);
+  const finished = draft.finishedMatch;
+  const queue = [...(finished.benchQueue || [finished.bench].filter(Boolean))];
+  if (finished.tieAction === "exit-both" && queue.length >= 2) {
+    const nextPlaying = queue.slice(0, 2);
+    const nextQueue = [...queue.slice(2), ...finished.playing];
+    startMatch(nextPlaying, nextQueue);
+    return;
+  }
+  const stay = finished.winner || finished.stayTeam || finished.playing[0];
+  const entering = queue[0];
+  if (!entering) {
+    startMatch(finished.playing, []);
+    return;
+  }
+  const leaving = finished.playing.find((teamKey) => teamKey !== stay);
+  const nextQueue = [...queue.slice(1), leaving].filter(Boolean);
+  startMatch([stay, entering], nextQueue);
 }
 
 function finishSession() {
@@ -1851,6 +1958,7 @@ function buildSessionSummary() {
   const winnerTeamKey = teamKeys().sort((a, b) => winsByTeam[b] - winsByTeam[a])[0];
   const hasTeamWinner = winsByTeam[winnerTeamKey] > 0;
   const teamColors = structuredClone(draft.teamColors || { blue: "blue", red: "red", green: "green" });
+  const teamNames = structuredClone(draft.teamNames || {});
   const topScorer = topBy(stats, "goals", "Sem gols");
   const topAssistant = topBy(stats, "assists", "Sem assistencias");
   const topHot = topBy(stats, "wins", "Sem vitorias");
@@ -1863,6 +1971,7 @@ function buildSessionSummary() {
     seasonName: season?.name || "Sem temporada",
     settings: { ...draft.settings },
     teamColors,
+    teamNames,
     teams: structuredClone(draft.teams),
     matches: structuredClone(draft.completedMatches),
     stats: structuredClone(stats),
@@ -2516,7 +2625,7 @@ function recalculateSession(session) {
     item.wins = 0;
   });
 
-  session.winsByTeam = Object.fromEntries(teamKeys().map((key) => [key, 0]));
+  session.winsByTeam = Object.fromEntries(teamKeys(session).map((key) => [key, 0]));
   session.matches.forEach((match) => {
     if (!match.winner) return;
     session.winsByTeam[match.winner] += 1;
@@ -2534,7 +2643,7 @@ function recalculateSession(session) {
     });
   });
 
-  const winnerTeamKey = teamKeys().sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
+  const winnerTeamKey = teamKeys(session).sort((a, b) => session.winsByTeam[b] - session.winsByTeam[a])[0];
   const hasTeamWinner = session.winsByTeam[winnerTeamKey] > 0;
   session.winnerTeam = {
     key: hasTeamWinner ? winnerTeamKey : "",
@@ -2554,11 +2663,14 @@ function resetDraft() {
   clearInterval(timerId);
   const settings = draft?.settings || { ...DEFAULT_SETTINGS };
   const teamColors = draft?.teamColors || { blue: "blue", red: "red", green: "green" };
+  const teamNames = draft?.teamNames || {};
   const seasonId = profile.currentSeasonId;
   draft = newDraft();
   draft.settings = { ...settings };
   draft.teamColors = { ...teamColors };
+  draft.teamNames = { ...teamNames };
   draft.seasonId = seasonId;
+  ensureDraftTeams();
   profile.draft = draft;
   saveStore();
   showAppTab("game");
@@ -2570,7 +2682,11 @@ function saveMatchSettings(event) {
   const durationMinutes = Math.max(1, Math.min(60, Number(els.durationInput.value) || DEFAULT_SETTINGS.durationMinutes));
   const goalLimit = Math.max(1, Math.min(20, Number(els.goalLimitInput.value) || DEFAULT_SETTINGS.goalLimit));
   const playersPerTeam = Math.max(1, Math.min(20, Number(els.playersPerTeamInput.value) || DEFAULT_SETTINGS.playersPerTeam));
-  draft.settings = { durationMinutes, goalLimit, playersPerTeam };
+  const teamCount = Math.max(3, Math.min(6, Number(els.teamCountInput.value) || DEFAULT_SETTINGS.teamCount));
+  const teamIdentity = els.teamIdentityInput.value || DEFAULT_SETTINGS.teamIdentity;
+  const drawTieRule = els.drawTieRuleInput.value || DEFAULT_SETTINGS.drawTieRule;
+  draft.settings = { durationMinutes, goalLimit, playersPerTeam, teamCount, teamIdentity, drawTieRule };
+  ensureDraftTeams();
   render();
 }
 
@@ -2662,6 +2778,83 @@ function exportPodiumImage() {
   link.download = `peladafast-podio-${Date.now()}.png`;
   link.href = canvas.toDataURL("image/png");
   link.click();
+}
+
+async function exportStravaImage() {
+  if (!draft.finalSummary) return;
+  const summary = draft.finalSummary;
+  const canvas = document.createElement("canvas");
+  canvas.width = 1080;
+  canvas.height = 1350;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.strokeStyle = "rgba(155, 227, 29, .75)";
+  ctx.lineWidth = 6;
+  roundRect(ctx, 54, 54, 972, 1242, 42);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(7, 16, 6, .86)";
+  roundRect(ctx, 72, 72, 936, 1206, 34);
+  ctx.fill();
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 42px Arial";
+  ctx.fillText("PELADAFAST", 104, 142);
+  ctx.fillStyle = "#f5f7f2";
+  ctx.font = "900 56px Arial";
+  wrapCanvasText(ctx, "Resumo da rodada", 104, 230, 850, 62);
+  drawStravaMetric(ctx, "Time vencedor", summary.winnerTeam.label, 104, 330, 872);
+  drawStravaMetric(ctx, "Artilheiro", summary.topScorer.label, 104, 500, 410);
+  drawStravaMetric(ctx, "Assistente", summary.topAssistant.label, 566, 500, 410);
+  drawStravaMetric(ctx, "Craque da rodada", summary.topMvp?.label || "Sem destaque", 104, 670, 872);
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 30px Arial";
+  ctx.fillText("Elenco campeao", 104, 855);
+  const winnerPlayers = summary.winnerTeam.key ? (summary.teams?.[summary.winnerTeam.key]?.players || []) : [];
+  let x = 104;
+  let y = 900;
+  winnerPlayers.slice(0, 14).forEach((ref) => {
+    const name = playerDisplayName(ref);
+    ctx.font = "800 24px Arial";
+    const width = Math.min(300, ctx.measureText(name).width + 34);
+    if (x + width > 976) {
+      x = 104;
+      y += 58;
+    }
+    ctx.fillStyle = "rgba(245, 247, 242, .12)";
+    roundRect(ctx, x, y, width, 42, 18);
+    ctx.fill();
+    ctx.fillStyle = "#f5f7f2";
+    ctx.fillText(name, x + 17, y + 28);
+    x += width + 12;
+  });
+  ctx.fillStyle = "#9aa393";
+  ctx.font = "800 24px Arial";
+  ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 104, 1212);
+  const link = document.createElement("a");
+  link.download = `peladafast-resumo-transparente-${Date.now()}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+}
+
+function drawStravaMetric(ctx, title, value, x, y, width) {
+  ctx.fillStyle = "rgba(155, 227, 29, .13)";
+  roundRect(ctx, x, y - 58, width, 132, 24);
+  ctx.fill();
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 24px Arial";
+  ctx.fillText(title.toUpperCase(), x + 24, y - 18);
+  ctx.fillStyle = "#f5f7f2";
+  ctx.font = "900 34px Arial";
+  wrapCanvasText(ctx, value, x + 24, y + 30, width - 48, 38);
+}
+
+function roundRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.arcTo(x + width, y, x + width, y + height, radius);
+  ctx.arcTo(x + width, y + height, x, y + height, radius);
+  ctx.arcTo(x, y + height, x, y, radius);
+  ctx.arcTo(x, y, x + width, y, radius);
+  ctx.closePath();
 }
 
 function drawPodiumLine(ctx, title, value, x, y) {
@@ -2836,10 +3029,18 @@ els.teamsGrid.addEventListener("click", (event) => {
 
 els.teamsGrid.addEventListener("change", (event) => {
   const select = event.target.closest("[data-team-color]");
-  if (!select) return;
-  const teamKey = select.dataset.teamColor;
-  draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
-  draft.teamColors[teamKey] = select.value;
+  const nameInput = event.target.closest("[data-team-name]");
+  if (select) {
+    const teamKey = select.dataset.teamColor;
+    draft.teamColors ||= { blue: "blue", red: "red", green: "green" };
+    draft.teamColors[teamKey] = select.value;
+  }
+  if (nameInput) {
+    const teamKey = nameInput.dataset.teamName;
+    draft.teamNames ||= {};
+    draft.teamNames[teamKey] = nameInput.value.trim() || TEAM_META[teamKey]?.name || "Time";
+  }
+  if (!select && !nameInput) return;
   render();
 });
 

@@ -62,7 +62,7 @@ create table if not exists public.sessions (
   profile_id uuid not null references public.pelada_profiles(id) on delete cascade,
   season_id uuid not null references public.seasons(id) on delete restrict,
   played_at timestamptz not null default now(),
-  settings jsonb not null default '{"durationMinutes": 7, "goalLimit": 2, "playersPerTeam": 5}'::jsonb,
+  settings jsonb not null default '{"durationMinutes": 7, "goalLimit": 2, "playersPerTeam": 5, "teamCount": 3, "teamIdentity": "color", "drawTieRule": "decide-stay"}'::jsonb,
   teams jsonb not null default '{}'::jsonb,
   matches jsonb not null default '[]'::jsonb,
   stats jsonb not null default '[]'::jsonb,

@@ -409,7 +409,7 @@ p {
 }
 
 .settings-form {
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 }
 
 .teams-grid {
@@ -429,7 +429,8 @@ p {
   gap: 10px;
 }
 
-.team-color-picker {
+.team-color-picker,
+.team-name-field {
   margin-top: 12px;
 }
 
@@ -1549,5 +1550,71 @@ p {
 
   .match-view.full-score .score {
     font-size: clamp(82px, 26vw, 138px);
+  }
+}
+
+@media (max-width: 920px) {
+  .app-shell.full-score-active {
+    width: 100%;
+    padding: 0;
+  }
+
+  .match-view.full-score {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    padding: 8px;
+    overflow: hidden;
+    background: var(--bg);
+  }
+
+  .match-view.full-score .scoreboard {
+    min-height: 0;
+    height: 100%;
+    gap: 8px;
+  }
+
+  .match-view.full-score .team-panel,
+  .match-view.full-score .timer-panel {
+    min-height: 0;
+    padding: 10px;
+    overflow: hidden;
+  }
+
+  .match-view.full-score h2,
+  .match-view.full-score h3 {
+    margin-bottom: 4px;
+    font-size: clamp(18px, 5vw, 30px);
+  }
+
+  .match-view.full-score .players-mini,
+  .match-view.full-score .quick-goal {
+    display: none;
+  }
+
+  .match-view.full-score .timer {
+    font-size: clamp(32px, 10vw, 58px);
+  }
+
+  .match-view.full-score .rule,
+  .match-view.full-score .match-label {
+    font-size: 11px;
+  }
+}
+
+@media (max-width: 920px) and (orientation: portrait) {
+  .match-view.full-score .scoreboard {
+    grid-template-rows: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 920px) and (orientation: landscape) {
+  .match-view.full-score .scoreboard {
+    grid-template-columns: minmax(0, 1fr) minmax(150px, .5fr) minmax(0, 1fr);
+  }
+
+  .match-view.full-score .score {
+    font-size: clamp(64px, 18vw, 128px);
   }
 }

@@ -117,6 +117,20 @@
                 <label>Duração<input id="durationInput" name="durationMinutes" type="number" min="1" max="60" step="1"></label>
                 <label>Gols para vencer<input id="goalLimitInput" name="goalLimit" type="number" min="1" max="20" step="1"></label>
                 <label>Jogadores por time<input id="playersPerTeamInput" name="playersPerTeam" type="number" min="1" max="20" step="1"></label>
+                <label>Quantidade de times<input id="teamCountInput" name="teamCount" type="number" min="3" max="6" step="1"></label>
+                <label>Identidade dos times
+                  <select id="teamIdentityInput" name="teamIdentity">
+                    <option value="color">Por cor</option>
+                    <option value="name">Nome proprio</option>
+                  </select>
+                </label>
+                <label>Empate com banco
+                  <select id="drawTieRuleInput" name="drawTieRule">
+                    <option value="decide-stay">Decidimos quem fica</option>
+                    <option value="exit-both">Sai os dois</option>
+                    <option value="longest-out">Sai quem esta ha mais tempo</option>
+                  </select>
+                </label>
                 <button class="secondary-action" type="submit">Salvar regras</button>
               </form>
             </div>
@@ -125,7 +139,7 @@
           <div class="section-head">
             <div>
               <p class="eyebrow">Times da rodada</p>
-              <h2>Monte azul, vermelho e verde</h2>
+              <h2>Monte os times da pelada</h2>
             </div>
             <div class="section-actions">
               <button class="secondary-action" id="balanceTeams">Sugerir times equilibrados</button>
