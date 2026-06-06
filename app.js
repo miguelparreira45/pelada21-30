@@ -2797,29 +2797,23 @@ async function exportStravaImage() {
   roundRect(ctx, 34, 34, 1532, 632, 40);
   ctx.stroke();
   if (logo) {
-    ctx.drawImage(logo, 70, 62, 290, 116);
+    ctx.drawImage(logo, 58, 48, 380, 152);
   } else {
     ctx.fillStyle = "#9be31d";
-    ctx.font = "900 42px Arial";
-    ctx.fillText("PELADAFAST", 78, 130);
+    ctx.font = "900 52px Arial";
+    ctx.fillText("PELADAFAST", 78, 138);
   }
   ctx.fillStyle = "#9be31d";
   ctx.font = "900 20px Arial";
-  ctx.fillText("@PELADAFAST", 1260, 96);
-  ctx.strokeStyle = "rgba(155, 227, 29, .85)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(1236, 89, 16, 0, Math.PI * 2);
-  ctx.stroke();
-  ctx.font = "900 18px Arial";
-  ctx.fillText("@", 1228, 96);
+  drawInstagramIcon(ctx, 1210, 74, 28);
+  ctx.fillText("@PELADAFAST", 1252, 96);
   ctx.fillStyle = "#f5f7f2";
   ctx.font = "900 46px Arial";
-  wrapCanvasText(ctx, "Resumo da rodada", 78, 238, 500, 52);
+  wrapCanvasText(ctx, "Resumo da rodada", 78, 260, 500, 52);
   drawStravaMetric(ctx, "Time vencedor", summary.winnerTeam.label, 78, 340, 520, 124);
   drawStravaMetric(ctx, "Artilheiro", summary.topScorer.label, 632, 230, 420, 118);
   drawStravaMetric(ctx, "Assistente", summary.topAssistant.label, 1090, 230, 420, 118);
-  drawStravaMetric(ctx, "Craque da rodada", summary.topMvp?.label || "Sem destaque", 632, 388, 878, 118);
+  drawStravaMvpMetric(ctx, summary.topMvp, 632, 388, 878, 118);
   ctx.fillStyle = "#9be31d";
   ctx.font = "900 25px Arial";
   ctx.fillText("ELENCO CAMPEAO", 78, 520);
@@ -2860,6 +2854,57 @@ function drawStravaMetric(ctx, title, value, x, y, width, height = 132) {
   ctx.fillStyle = "#f5f7f2";
   ctx.font = "900 30px Arial";
   wrapCanvasText(ctx, value, x + 24, y + 28, width - 48, 34);
+}
+
+function drawStravaMvpMetric(ctx, topMvp, x, y, width, height = 132) {
+  const names = topMvp?.players?.length
+    ? topMvp.players.map((item) => item.name).join(", ")
+    : "Sem destaque";
+  const score = Number(topMvp?.value) || 0;
+  ctx.fillStyle = "rgba(155, 227, 29, .13)";
+  roundRect(ctx, x, y - 58, width, height, 24);
+  ctx.fill();
+  drawStarIcon(ctx, x + 26, y - 34, 16);
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 20px Arial";
+  ctx.fillText("CRAQUE DA RODADA", x + 54, y - 18);
+  ctx.fillStyle = "#f5f7f2";
+  ctx.font = "900 30px Arial";
+  wrapCanvasText(ctx, names, x + 24, y + 20, width - 48, 34);
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 22px Arial";
+  ctx.fillText(`Nota PeladaFast: ${score ? score.toFixed(1) : "0.0"}`, x + 24, y + 78);
+}
+
+function drawStarIcon(ctx, x, y, radius) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.beginPath();
+  for (let i = 0; i < 10; i += 1) {
+    const angle = (Math.PI / 5) * i - Math.PI / 2;
+    const pointRadius = i % 2 === 0 ? radius : radius * 0.45;
+    ctx.lineTo(Math.cos(angle) * pointRadius, Math.sin(angle) * pointRadius);
+  }
+  ctx.closePath();
+  ctx.fillStyle = "#9be31d";
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawInstagramIcon(ctx, x, y, size) {
+  ctx.save();
+  ctx.strokeStyle = "#9be31d";
+  ctx.lineWidth = 3;
+  roundRect(ctx, x, y, size, size, 8);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + size / 2, y + size / 2, size * 0.22, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + size * 0.74, y + size * 0.26, 2.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#9be31d";
+  ctx.fill();
+  ctx.restore();
 }
 
 function loadImage(src) {

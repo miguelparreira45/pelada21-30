@@ -864,7 +864,7 @@ p {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 30;
+  z-index: 90;
   display: grid;
   place-items: center;
   padding: 18px;
@@ -1601,6 +1601,19 @@ p {
     align-items: center;
     justify-content: center;
     font-size: 13px;
+  }
+
+  .app-shell.full-score-active ~ .modal-backdrop {
+    z-index: 120;
+    padding: 8px;
+    align-items: center;
+  }
+
+  .app-shell.full-score-active ~ .modal-backdrop .modal-card {
+    width: min(520px, 100%);
+    max-height: calc(100svh - 16px);
+    overflow: auto;
+    padding: 12px;
   }
 
   .match-view.full-score .timer {
