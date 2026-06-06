@@ -2901,16 +2901,43 @@ function drawStravaMvpMetric(ctx, topMvp, x, y, width, height = 132) {
   ctx.font = "900 20px Arial";
   ctx.fillText("CRAQUE DA RODADA", x + 62, y - 18);
   ctx.fillStyle = "#f5f7f2";
-  drawAdaptiveCanvasText(ctx, names, x + 24, y + 18, width - 48, {
-    maxHeight: 48,
+  const noteWidth = 270;
+  drawAdaptiveCanvasText(ctx, names, x + 24, y + 24, width - noteWidth - 64, {
+    maxHeight: 64,
     maxFontSize: 32,
-    minFontSize: 18,
+    minFontSize: 12,
     weight: 900,
     lineGap: 1
   });
+  drawUrbanNoteBadge(ctx, `Nota PeladaFast: ${score ? score.toFixed(1) : "0.0"}`, x + width - noteWidth - 24, y + 2, noteWidth, 60);
+}
+
+function drawUrbanNoteBadge(ctx, text, x, y, width, height) {
+  ctx.save();
+  ctx.translate(x + width / 2, y + height / 2);
+  ctx.rotate(-0.025);
+  ctx.translate(-(x + width / 2), -(y + height / 2));
+  ctx.fillStyle = "#050805";
+  roundRect(ctx, x, y, width, height, 14);
+  ctx.fill();
+  ctx.strokeStyle = "#9be31d";
+  ctx.lineWidth = 4;
+  roundRect(ctx, x, y, width, height, 14);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(245, 247, 242, .2)";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.moveTo(x + 12, y + height - 14);
+  ctx.lineTo(x + width - 14, y + 12);
+  ctx.stroke();
   ctx.fillStyle = "#9be31d";
-  ctx.font = "900 30px 'Brush Script MT', 'Segoe Print', cursive";
-  ctx.fillText(`Nota PeladaFast: ${score ? score.toFixed(1) : "0.0"}`, x + 24, y + 78);
+  ctx.strokeStyle = "#071006";
+  ctx.lineWidth = 5;
+  ctx.font = "900 24px Impact, 'Arial Black', sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.strokeText(text.toUpperCase(), x + 16, y + height / 2 + 1);
+  ctx.fillText(text.toUpperCase(), x + 16, y + height / 2 + 1);
+  ctx.restore();
 }
 
 function drawAdaptiveCanvasText(ctx, text, x, y, maxWidth, options = {}) {
