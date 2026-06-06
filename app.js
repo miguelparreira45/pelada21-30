@@ -2811,9 +2811,9 @@ async function exportStravaImage() {
   ctx.font = "900 46px Arial";
   wrapCanvasText(ctx, "Resumo da rodada", 78, 260, 500, 52);
   drawStravaMetric(ctx, "Time vencedor", summary.winnerTeam.label, 78, 340, 520, 124);
-  drawStravaMetric(ctx, "Artilheiro", summary.topScorer.label, 632, 230, 420, 118);
-  drawStravaMetric(ctx, "Assistente", summary.topAssistant.label, 1090, 230, 420, 118);
-  drawStravaMvpMetric(ctx, summary.topMvp, 632, 388, 878, 118);
+  drawStravaLeaderMetric(ctx, "Artilheiro", summary.topScorer, 632, 230, 420, 142);
+  drawStravaLeaderMetric(ctx, "Assistente", summary.topAssistant, 1090, 230, 420, 142);
+  drawStravaMvpMetric(ctx, summary.topMvp, 632, 410, 878, 130);
   ctx.fillStyle = "#9be31d";
   ctx.font = "900 25px Arial";
   ctx.fillText("ELENCO CAMPEAO", 78, 520);
@@ -2856,24 +2856,105 @@ function drawStravaMetric(ctx, title, value, x, y, width, height = 132) {
   wrapCanvasText(ctx, value, x + 24, y + 28, width - 48, 34);
 }
 
+function drawStravaLeaderMetric(ctx, title, leader, x, y, width, height = 132) {
+  const names = leader?.players?.length
+    ? leader.players.map((item) => item.name).join(", ")
+    : leader?.label || "Sem destaque";
+  const value = Number(leader?.value) || 0;
+  ctx.fillStyle = "rgba(155, 227, 29, .13)";
+  roundRect(ctx, x, y - 58, width, height, 24);
+  ctx.fill();
+  ctx.fillStyle = "#9be31d";
+  ctx.font = "900 20px Arial";
+  ctx.fillText(title.toUpperCase(), x + 24, y - 18);
+  ctx.fillStyle = "#f5f7f2";
+  drawAdaptiveCanvasText(ctx, names, x + 24, y + 14, width - 48, {
+    maxHeight: 78,
+    maxFontSize: 30,
+    minFontSize: 10,
+    weight: 900,
+    lineGap: 1
+  });
+  if (value) {
+    const unit = title.toLowerCase().includes("assist") ? "assistencia" : "gol";
+    const plural = title.toLowerCase().includes("assist") ? "assistencias" : "gols";
+    ctx.fillStyle = "#9be31d";
+    ctx.font = "900 18px Arial";
+    ctx.fillText(`${value} ${value === 1 ? unit : plural}`, x + 24, y + 78);
+  }
+}
+
 function drawStravaMvpMetric(ctx, topMvp, x, y, width, height = 132) {
   const names = topMvp?.players?.length
     ? topMvp.players.map((item) => item.name).join(", ")
     : "Sem destaque";
   const score = Number(topMvp?.value) || 0;
-  ctx.fillStyle = "rgba(155, 227, 29, .13)";
+  ctx.fillStyle = "rgba(155, 227, 29, .22)";
   roundRect(ctx, x, y - 58, width, height, 24);
   ctx.fill();
-  drawStarIcon(ctx, x + 26, y - 34, 16);
+  ctx.strokeStyle = "rgba(155, 227, 29, .85)";
+  ctx.lineWidth = 3;
+  roundRect(ctx, x, y - 58, width, height, 24);
+  ctx.stroke();
+  drawStarIcon(ctx, x + 28, y - 32, 20);
   ctx.fillStyle = "#9be31d";
   ctx.font = "900 20px Arial";
-  ctx.fillText("CRAQUE DA RODADA", x + 54, y - 18);
+  ctx.fillText("CRAQUE DA RODADA", x + 62, y - 18);
   ctx.fillStyle = "#f5f7f2";
-  ctx.font = "900 30px Arial";
-  wrapCanvasText(ctx, names, x + 24, y + 20, width - 48, 34);
+  drawAdaptiveCanvasText(ctx, names, x + 24, y + 18, width - 48, {
+    maxHeight: 48,
+    maxFontSize: 32,
+    minFontSize: 18,
+    weight: 900,
+    lineGap: 1
+  });
   ctx.fillStyle = "#9be31d";
-  ctx.font = "900 22px Arial";
+  ctx.font = "900 30px 'Brush Script MT', 'Segoe Print', cursive";
   ctx.fillText(`Nota PeladaFast: ${score ? score.toFixed(1) : "0.0"}`, x + 24, y + 78);
+}
+
+function drawAdaptiveCanvasText(ctx, text, x, y, maxWidth, options = {}) {
+  const maxHeight = options.maxHeight || 72;
+  const maxFontSize = options.maxFontSize || 30;
+  const minFontSize = options.minFontSize || 15;
+  const weight = options.weight || 900;
+  const family = options.family || "Arial";
+  const lineGap = options.lineGap ?? 2;
+  for (let size = maxFontSize; size >= minFontSize; size -= 1) {
+    ctx.font = `${weight} ${size}px ${family}`;
+    const lineHeight = size + lineGap;
+    const lines = canvasTextLines(ctx, text, maxWidth);
+    if (lines.length * lineHeight <= maxHeight) {
+      lines.forEach((line, index) => ctx.fillText(line, x, y + (index * lineHeight)));
+      return;
+    }
+  }
+  ctx.font = `${weight} ${minFontSize}px ${family}`;
+  const lines = canvasTextLines(ctx, text, maxWidth);
+  const lineHeight = Math.max(7, maxHeight / Math.max(1, lines.length));
+  const fittedFontSize = Math.max(7, Math.min(minFontSize, lineHeight - 1));
+  ctx.font = `${weight} ${fittedFontSize}px ${family}`;
+  lines.forEach((line, index) => ctx.fillText(line, x, y + (index * lineHeight)));
+}
+
+function canvasTextLines(ctx, text, maxWidth) {
+  const parts = String(text).split(",").map((item) => item.trim()).filter(Boolean);
+  const words = parts.length > 1 ? parts : String(text).split(" ");
+  const lines = [];
+  let line = "";
+  words.forEach((word) => {
+    const candidate = line ? `${line}, ${word}` : word;
+    const plainCandidate = line ? `${line} ${word}` : word;
+    const test = parts.length > 1 ? candidate : plainCandidate;
+    if (ctx.measureText(test).width > maxWidth && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = test;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
 }
 
 function drawStarIcon(ctx, x, y, radius) {
