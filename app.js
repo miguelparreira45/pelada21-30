@@ -43,6 +43,7 @@ let editingSessionId = null;
 let supabaseClient = null;
 let currentUser = null;
 let isCloudMode = false;
+let publicSharePayload = null;
 
 const els = {
   authShell: document.querySelector("#authShell"),
@@ -2147,6 +2148,7 @@ function renderSeasonAwards(awards) {
 
 function renderShare() {
   const payload = buildSharePayload();
+  publicSharePayload = payload;
   const seasonName = payload.season.name || "Temporada atual";
   const publishedSlug = profile?.publicShares?.[payload.season.id];
   const shareLink = publishedSlug === payload.slug ? publicShareUrl(payload.slug) : "";
@@ -2177,6 +2179,9 @@ function renderShare() {
 function buildSharePayload() {
   const season = currentSeason();
   const seasonSessions = (profile?.sessions || []).filter((session) => session.seasonId === profile.currentSeasonId);
+  const latestSession = seasonSessions
+    .slice()
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0] || null;
   const stats = buildOverallStats(seasonSessions);
   const rankings = {
     goals: rankingFor(stats, "goals"),
@@ -2203,6 +2208,7 @@ function buildSharePayload() {
     },
     slug: shareSlug(),
     generatedAt: new Date().toISOString(),
+    daily: buildPublicDailySession(latestSession),
     totals: {
       sessions: seasonSessions.length,
       matches: seasonSessions.reduce((sum, session) => sum + (session.matches?.length || 0), 0)
@@ -2225,6 +2231,60 @@ function buildSharePayload() {
         label: session.winnerTeam.label,
         players: championPlayers(session)
       }))
+  };
+}
+
+function buildPublicDailySession(session) {
+  if (!session) return null;
+  const expiresAt = new Date(new Date(session.date).getTime() + (24 * 60 * 60 * 1000)).toISOString();
+  const totalGoals = (session.stats || []).reduce((sum, item) => sum + (Number(item.goals) || 0), 0);
+  const totalAssists = (session.stats || []).reduce((sum, item) => sum + (Number(item.assists) || 0), 0);
+  return {
+    id: session.id,
+    date: session.date,
+    expiresAt,
+    title: new Date(session.date).toLocaleDateString("pt-BR"),
+    totals: {
+      matches: session.matches?.length || 0,
+      goals: totalGoals,
+      assists: totalAssists
+    },
+    winnerTeam: session.winnerTeam,
+    topScorer: session.topScorer,
+    topAssistant: session.topAssistant,
+    topMvp: session.topMvp,
+    storySummary: buildStorySummaryFromSession(session),
+    matches: (session.matches || []).map((match, index) => ({
+      number: index + 1,
+      score: match.playing.map((key) => `${teamName(key, session)} ${match.score?.[key] || 0}`).join(" x "),
+      result: match.winner
+        ? `Vencedor: ${teamName(match.winner, session)}${match.overtimeGoal ? " com gol apos o tempo" : ""}`
+        : match.kingTable
+          ? `Rei da mesa: ${teamName(match.stayTeam, session)}`
+          : "Empate",
+      goals: (match.goals || []).map((goal) => ({
+        teamName: teamName(goal.teamKey, session),
+        scorer: sessionPlayerName(session, goal.scorer),
+        assistant: goal.ownGoal ? "" : sessionPlayerName(session, goal.assistant),
+        ownGoal: Boolean(goal.ownGoal),
+        at: formatClock(goal.at)
+      }))
+    })),
+    stats: (session.stats || [])
+      .filter((item) => (Number(item.goals) || 0) || (Number(item.assists) || 0))
+      .sort((a, b) => (Number(b.goals) + Number(b.assists)) - (Number(a.goals) + Number(a.assists)) || a.name.localeCompare(b.name))
+      .map((item) => ({
+        name: item.name,
+        goals: Number(item.goals) || 0,
+        assists: Number(item.assists) || 0
+      }))
+  };
+}
+
+function buildStorySummaryFromSession(session) {
+  return {
+    ...structuredClone(session),
+    winnerPlayers: championPlayers(session)
   };
 }
 
@@ -2271,10 +2331,12 @@ function publicShareUrl(slug) {
 
 function renderPublicPayload(payload, isPreview = false) {
   const title = isPreview ? "Previa publica" : payload.profile.peladaName;
+  const dailyActive = payload.daily && new Date(payload.daily.expiresAt) > new Date();
   return `
+    ${dailyActive ? renderPublicDaily(payload.daily) : renderPublicDailyExpired(payload.daily)}
     <section class="data-card public-summary-card">
       <p class="eyebrow">${escapeHtml(title)}</p>
-      <h3>${escapeHtml(payload.season.name)}</h3>
+      <h3>Temporada completa: ${escapeHtml(payload.season.name)}</h3>
       <div class="leader-grid">
         <div class="leader-box"><span>Peladas</span><strong>${payload.totals.sessions}</strong></div>
         <div class="leader-box"><span>Partidas</span><strong>${payload.totals.matches}</strong></div>
@@ -2305,6 +2367,75 @@ function renderPublicPayload(payload, isPreview = false) {
           : "<p>Nenhuma pelada finalizada nesta temporada ainda.</p>"}
       </div>
     </section>
+  `;
+}
+
+function renderPublicDaily(daily) {
+  return `
+    <section class="data-card public-daily-card">
+      <div class="section-head">
+        <div>
+          <p class="eyebrow">Pelada do dia</p>
+          <h3>${escapeHtml(daily.title)}</h3>
+        </div>
+        <button class="primary-action" data-rescue-summary type="button">Resgate o resumo da pelada</button>
+      </div>
+      <p class="share-status">Disponivel por 24 horas. Expira em ${new Date(daily.expiresAt).toLocaleString("pt-BR")}.</p>
+      <div class="leader-grid">
+        <div class="leader-box"><span>Partidas</span><strong>${daily.totals.matches}</strong></div>
+        <div class="leader-box"><span>Gols</span><strong>${daily.totals.goals}</strong></div>
+        <div class="leader-box"><span>Assistencias</span><strong>${daily.totals.assists}</strong></div>
+        <div class="leader-box"><span>Time campeao</span><strong>${escapeHtml(daily.winnerTeam?.label || "Sem campeao")}</strong></div>
+      </div>
+      <div class="public-day-columns">
+        <section>
+          <h3>Historico de partidas</h3>
+          <div class="data-list">
+            ${daily.matches.length ? daily.matches.map(renderPublicDailyMatch).join("") : "<p>Nenhuma partida registrada.</p>"}
+          </div>
+        </section>
+        <section>
+          <h3>Gols e assistencias</h3>
+          <div class="ranking-list compact">
+            ${daily.stats.length
+              ? daily.stats.map((item, index) => `
+                <div class="ranking-row">
+                  <span class="rank-position">${index + 1}</span>
+                  <strong>${escapeHtml(item.name)}</strong>
+                  <span>${item.goals} G</span>
+                  <span>${item.assists} A</span>
+                </div>
+              `).join("")
+              : "<p>Sem gols ou assistencias registradas.</p>"}
+          </div>
+        </section>
+      </div>
+    </section>
+  `;
+}
+
+function renderPublicDailyExpired(daily) {
+  return `
+    <section class="data-card public-daily-card expired">
+      <p class="eyebrow">Pelada do dia</p>
+      <h3>${daily ? "Resumo expirado" : "Nenhuma pelada publicada hoje"}</h3>
+      <p>${daily ? "Os dados da pelada do dia ficam disponiveis por 24 horas. A temporada completa continua abaixo." : "Quando uma pelada for finalizada e publicada, o resumo do dia aparece aqui por 24 horas."}</p>
+    </section>
+  `;
+}
+
+function renderPublicDailyMatch(match) {
+  return `
+    <article class="public-match-card">
+      <div class="summary-row"><strong>Jogo ${match.number}</strong><span>${escapeHtml(match.score)} | ${escapeHtml(match.result)}</span></div>
+      <div class="public-goals-list">
+        ${match.goals.length
+          ? match.goals.map((goal) => `
+            <span>${escapeHtml(goal.teamName)} - ${goal.ownGoal ? `Gol contra de ${escapeHtml(goal.scorer)}` : `${escapeHtml(goal.scorer)} / Assist.: ${escapeHtml(goal.assistant)}`} <small>${escapeHtml(goal.at)}</small></span>
+          `).join("")
+          : "<span>Sem gols registrados.</span>"}
+      </div>
+    </article>
   `;
 }
 
@@ -2393,6 +2524,7 @@ async function loadPublicShare(slug) {
     return;
   }
   const payload = data.payload;
+  publicSharePayload = payload;
   els.publicProfile.textContent = `@${payload.profile?.username || "pelada"}`;
   els.publicTitle.textContent = payload.profile?.peladaName || "Resumo da pelada";
   els.publicGrid.innerHTML = renderPublicPayload(payload);
@@ -2782,7 +2914,11 @@ function exportPodiumImage() {
 
 async function exportStravaImage() {
   if (!draft.finalSummary) return;
-  const summary = draft.finalSummary;
+  await exportStravaImageFromSummary(draft.finalSummary);
+}
+
+async function exportStravaImageFromSummary(summary) {
+  if (!summary) return;
   const canvas = document.createElement("canvas");
   canvas.width = 1600;
   canvas.height = 700;
@@ -2817,11 +2953,13 @@ async function exportStravaImage() {
   ctx.fillStyle = "#9be31d";
   ctx.font = "900 25px Arial";
   ctx.fillText("ELENCO CAMPEAO", 78, 520);
-  const winnerPlayers = summary.winnerTeam.key ? (summary.teams?.[summary.winnerTeam.key]?.players || []) : [];
+  const winnerPlayers = summary.winnerPlayers?.length
+    ? summary.winnerPlayers
+    : summary.winnerTeam.key ? (summary.teams?.[summary.winnerTeam.key]?.players || []) : [];
   let x = 78;
   let y = 548;
   winnerPlayers.slice(0, 12).forEach((ref) => {
-    const name = playerDisplayName(ref);
+    const name = typeof ref === "string" && !findPlayer(ref) ? ref : playerDisplayName(ref);
     ctx.font = "800 21px Arial";
     const width = Math.min(230, ctx.measureText(name).width + 30);
     if (x + width > 1518) {
@@ -2842,6 +2980,19 @@ async function exportStravaImage() {
   link.download = `peladafast-resumo-transparente-${Date.now()}.png`;
   link.href = canvas.toDataURL("image/png");
   link.click();
+}
+
+async function rescuePublicSummary() {
+  const daily = publicSharePayload?.daily;
+  if (!daily?.storySummary) {
+    alert("Ainda nao existe resumo da pelada para resgatar.");
+    return;
+  }
+  if (new Date(daily.expiresAt) <= new Date()) {
+    alert("O resumo da pelada do dia expirou. A temporada completa continua disponivel.");
+    return;
+  }
+  await exportStravaImageFromSummary(daily.storySummary);
 }
 
 function drawStravaMetric(ctx, title, value, x, y, width, height = 132) {
@@ -3325,6 +3476,11 @@ els.exportBackup.addEventListener("click", exportBackup);
 els.importBackup.addEventListener("change", importBackup);
 els.publishShare.addEventListener("click", publishSharePage);
 els.shareGrid.addEventListener("click", (event) => {
+  const rescueButton = event.target.closest("[data-rescue-summary]");
+  if (rescueButton) {
+    rescuePublicSummary();
+    return;
+  }
   const button = event.target.closest("[data-copy-share]");
   if (!button) return;
   const input = document.querySelector("#shareUrl");
@@ -3332,6 +3488,9 @@ els.shareGrid.addEventListener("click", (event) => {
   navigator.clipboard?.writeText(input.value).catch(() => {});
   const status = document.querySelector("#shareStatus");
   if (status) status.textContent = "Link copiado.";
+});
+els.publicGrid.addEventListener("click", (event) => {
+  if (event.target.closest("[data-rescue-summary]")) rescuePublicSummary();
 });
 els.playerProfileForm.addEventListener("submit", savePlayerProfile);
 els.cancelPlayerEdit.addEventListener("click", () => {

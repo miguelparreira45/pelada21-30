@@ -1114,8 +1114,45 @@ p {
 
 .share-panel,
 .public-summary-card,
+.public-daily-card,
 .champion-history {
   grid-column: 1 / -1;
+}
+
+.public-daily-card.expired {
+  opacity: .78;
+}
+
+.public-day-columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(280px, .65fr);
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.public-match-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(245, 247, 242, .04);
+}
+
+.public-goals-list {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.public-goals-list span {
+  display: block;
+}
+
+.public-goals-list small {
+  color: var(--green);
+  font-weight: 850;
 }
 
 .share-link-box {
@@ -1261,7 +1298,8 @@ p {
   .data-grid,
   .leader-grid,
   .charts-grid,
-  .top5-grid {
+  .top5-grid,
+  .public-day-columns {
     grid-template-columns: 1fr;
   }
 
