@@ -624,6 +624,12 @@ function teamName(teamKey, source = draft) {
   return source?.teamNames?.[teamKey] || teamMeta(teamKey, source)?.name || TEAM_META[teamKey]?.name || "Time";
 }
 
+function formatScoreLine(match, source = draft) {
+  const [left, right] = match?.playing || [];
+  if (!left || !right) return "";
+  return `${teamName(left, source)} ${match.score?.[left] || 0} x ${match.score?.[right] || 0} ${teamName(right, source)}`;
+}
+
 function teamColor(teamKey, source = draft) {
   return teamMeta(teamKey, source)?.color || TEAM_META[teamKey]?.color || "#9be31d";
 }
@@ -1428,7 +1434,7 @@ function renderTimeline() {
 
 function renderEnded() {
   const match = draft.finishedMatch;
-  const scoreLine = match.playing.map((key) => `${teamName(key, match)} ${match.score[key]}`).join(" x ");
+  const scoreLine = formatScoreLine(match, match);
   const winner = match.winner ? teamName(match.winner, match) : null;
   const king = match.kingTable ? teamName(match.stayTeam, match) : null;
   const tieText = match.tieAction === "exit-both"
@@ -1475,7 +1481,7 @@ function renderMatchHistoryPreview(extraMatch = null) {
     <div class="match-history-preview">
       <h3>Historico da pelada</h3>
       ${matches.map((item, index) => {
-        const score = item.playing.map((key) => `${teamName(key, item)} ${item.score[key]}`).join(" x ");
+        const score = formatScoreLine(item, item);
         const result = item.winner
           ? `Vencedor: ${teamName(item.winner, item)}`
           : item.tieAction === "exit-both"
@@ -1897,7 +1903,7 @@ function renderSessionReview() {
       <h3>Revisao antes de salvar</h3>
       <div class="data-list">
         ${matches.map((match, index) => {
-          const score = match.playing.map((key) => `${teamName(key)} ${match.score[key]}`).join(" x ");
+          const score = formatScoreLine(match);
           const result = match.winner ? `Vencedor: ${teamName(match.winner)}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : `Rei da mesa: ${teamName(match.stayTeam)}`;
           return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${result}</span></div>`;
         }).join("") || "<p>Nenhuma partida registrada.</p>"}
@@ -2030,7 +2036,7 @@ function buildReport(summary) {
 
   lines.push("", "Partidas:");
   summary.matches.forEach((match, index) => {
-    const score = match.playing.map((key) => `${teamName(key, summary)} ${match.score[key]}`).join(" x ");
+    const score = formatScoreLine(match, summary);
     const result = match.winner
       ? `Vencedor: ${teamName(match.winner, summary)}${match.overtimeGoal ? " (gol apos o tempo)" : ""}`
       : `Rei da mesa: ${teamName(match.stayTeam, summary)}`;
@@ -2256,7 +2262,7 @@ function buildPublicDailySession(session) {
     storySummary: buildStorySummaryFromSession(session),
     matches: (session.matches || []).map((match, index) => ({
       number: index + 1,
-      score: match.playing.map((key) => `${teamName(key, session)} ${match.score?.[key] || 0}`).join(" x "),
+      score: formatScoreLine(match, session),
       result: match.winner
         ? `Vencedor: ${teamName(match.winner, session)}${match.overtimeGoal ? " com gol apos o tempo" : ""}`
         : match.kingTable
@@ -2597,7 +2603,7 @@ function filteredSessions(tab) {
 function renderSessionCard(session) {
   const date = new Date(session.date).toLocaleString("pt-BR");
   const matches = session.matches.map((match, index) => {
-    const score = match.playing.map((key) => `${teamName(key, session)} ${match.score[key]}`).join(" x ");
+    const score = formatScoreLine(match, session);
     const result = match.winner ? teamName(match.winner, session) : `Rei da mesa: ${teamName(match.stayTeam, session)}`;
     return `<div class="summary-row"><strong>Jogo ${index + 1}</strong><span>${score} | ${escapeHtml(result)}</span></div>`;
   }).join("");
@@ -2976,10 +2982,7 @@ async function exportStravaImageFromSummary(summary) {
   ctx.fillStyle = "#9aa393";
   ctx.font = "800 20px Arial";
   ctx.fillText(new Date(summary.date).toLocaleString("pt-BR"), 1260, 625);
-  const link = document.createElement("a");
-  link.download = `peladafast-resumo-transparente-${Date.now()}.png`;
-  link.href = canvas.toDataURL("image/png");
-  link.click();
+  await saveCanvasPng(canvas, `peladafast-resumo-transparente-${Date.now()}.png`, "Resumo da pelada PeladaFast");
 }
 
 async function rescuePublicSummary() {
@@ -2993,6 +2996,40 @@ async function rescuePublicSummary() {
     return;
   }
   await exportStravaImageFromSummary(daily.storySummary);
+}
+
+function canvasToBlob(canvas) {
+  return new Promise((resolve) => {
+    if (!canvas.toBlob) {
+      resolve(null);
+      return;
+    }
+    canvas.toBlob((blob) => resolve(blob), "image/png");
+  });
+}
+
+async function saveCanvasPng(canvas, filename, title) {
+  const blob = await canvasToBlob(canvas);
+  if (blob && window.File && navigator.share) {
+    const file = new File([blob], filename, { type: "image/png" });
+    if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share({
+          title,
+          text: "Resumo da pelada gerado no PeladaFast.",
+          files: [file]
+        });
+        return;
+      } catch (error) {
+        if (error?.name === "AbortError") return;
+      }
+    }
+  }
+  const link = document.createElement("a");
+  link.download = filename;
+  link.href = blob ? URL.createObjectURL(blob) : canvas.toDataURL("image/png");
+  link.click();
+  if (blob) setTimeout(() => URL.revokeObjectURL(link.href), 1000);
 }
 
 function drawStravaMetric(ctx, title, value, x, y, width, height = 132) {

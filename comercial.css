@@ -397,6 +397,26 @@ h3 {
   font-weight: 950;
 }
 
+.score-line-demo {
+  justify-content: center;
+  padding: 18px 12px;
+  border-radius: 8px;
+  background: #080b08;
+}
+
+.score-line-demo span {
+  color: var(--muted);
+  font-size: 24px;
+  font-weight: 950;
+}
+
+.score-line-demo strong {
+  display: inline;
+  color: var(--green);
+  font-size: 62px;
+  line-height: .9;
+}
+
 .event-feed {
   display: grid;
   gap: 8px;
