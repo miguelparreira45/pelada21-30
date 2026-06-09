@@ -107,6 +107,8 @@ const els = {
   ownGoal: document.querySelector("#ownGoal"),
   goalPlayer: document.querySelector("#goalPlayer"),
   assistPlayer: document.querySelector("#assistPlayer"),
+  goalPlayerChoices: document.querySelector("#goalPlayerChoices"),
+  assistPlayerChoices: document.querySelector("#assistPlayerChoices"),
   undoLastGoal: document.querySelector("#undoLastGoal"),
   runningSummary: document.querySelector("#runningSummary"),
   statsList: document.querySelector("#statsList"),
@@ -667,6 +669,34 @@ function availableGuestPlayers(targetTeamKey) {
     if (alreadyInTarget.has(player.id)) return false;
     return teamKeys().some((key) => draft.teams[key].players.includes(player.id));
   });
+}
+
+function availableComplementPlayers(targetTeamKey, match = draft.finishedMatch || draft.currentMatch) {
+  const alreadyInTarget = new Set(matchRoster(targetTeamKey, match));
+  return (profile.players || []).filter((player) => {
+    if (alreadyInTarget.has(player.id)) return false;
+    return teamKeys().some((key) => draft.teams[key]?.players?.includes(player.id));
+  });
+}
+
+function applyPendingComplementsToCurrentMatch() {
+  if (!draft.currentMatch || !draft.pendingComplements?.length) return;
+  const remaining = [];
+  draft.pendingComplements.forEach((item) => {
+    if (!draft.currentMatch.playing.includes(item.teamKey)) {
+      remaining.push(item);
+      return;
+    }
+    draft.currentMatch.guests[item.teamKey] ||= [];
+    draft.currentMatch.out[item.teamKey] ||= [];
+    if (item.outgoing && !draft.currentMatch.out[item.teamKey].includes(item.outgoing)) {
+      draft.currentMatch.out[item.teamKey].push(item.outgoing);
+    }
+    if (item.guest && !draft.currentMatch.guests[item.teamKey].includes(item.guest)) {
+      draft.currentMatch.guests[item.teamKey].push(item.guest);
+    }
+  });
+  draft.pendingComplements = remaining;
 }
 
 function findPlayer(ref) {
@@ -1303,8 +1333,9 @@ function renderLineupTeam(teamKey) {
         `).join("")}
       </div>
       <form class="complete-form" data-complete-team="${teamKey}">
-        <label>Quem sai
+        <label>Quem sai (opcional)
           <select name="outgoing" ${currentRoster.length ? "" : "disabled"}>
+            <option value="">Ninguem sai</option>
             ${currentRoster.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")}
           </select>
         </label>
@@ -1362,7 +1393,29 @@ function fillPlayerOptions() {
   if (!ownGoal && assistOptions.includes(previousAssistant)) els.assistPlayer.value = previousAssistant;
   if (!ownGoal && !els.assistPlayer.value && assistOptions.length) els.assistPlayer.value = assistOptions[0];
   els.assistPlayer.disabled = ownGoal || !assistOptions.length;
+  renderGoalChoiceBoxes(players, assistOptions);
   updateGoalFormState();
+}
+
+function renderGoalChoiceBoxes(players, assistOptions) {
+  const scorer = els.goalPlayer.value;
+  const assistant = els.assistPlayer.value;
+  els.goalPlayerChoices.innerHTML = players.length
+    ? players.map((ref) => `
+      <button class="player-choice ${ref === scorer ? "selected" : ""}" type="button" data-goal-choice="${escapeHtml(ref)}">
+        ${escapeHtml(playerDisplayName(ref))}
+      </button>
+    `).join("")
+    : "<span class=\"choice-empty\">Sem jogadores neste time.</span>";
+  els.assistPlayerChoices.innerHTML = els.ownGoal.checked
+    ? "<span class=\"choice-empty\">Gol contra nao precisa de assistencia.</span>"
+    : assistOptions.length
+      ? assistOptions.map((ref) => `
+        <button class="player-choice ${ref === assistant ? "selected" : ""}" type="button" data-assist-choice="${escapeHtml(ref)}">
+          ${escapeHtml(playerDisplayName(ref))}
+        </button>
+      `).join("")
+      : "<span class=\"choice-empty\">Sem outro jogador para assistencia.</span>";
 }
 
 function updateGoalFormState() {
@@ -1447,12 +1500,14 @@ function renderEnded() {
     <h2>${scoreLine}</h2>
     <p>${winner ? `Vencedor: ${winner}${match.overtimeGoal ? " com gol apos o tempo" : ""}` : king ? `${king} permanece em campo sem contar vitoria.` : tieText}</p>
     ${renderMatchHistoryPreview(match)}
+    ${renderLoanResolution(match)}
   `;
 
   const needsResolution = !match.winner && !match.kingTable && !match.tieResolved;
+  const needsLoanResolution = hasPendingLoanResolution(match);
   els.winnerChoice.classList.toggle("hidden", !needsResolution);
-  els.nextMatch.disabled = needsResolution;
-  els.finishSession.disabled = needsResolution;
+  els.nextMatch.disabled = needsResolution || needsLoanResolution;
+  els.finishSession.disabled = needsResolution || needsLoanResolution;
   if (needsResolution) {
     els.winnerChoice.innerHTML = `
       <h3>Como resolver o empate?</h3>
@@ -1471,6 +1526,92 @@ function renderEnded() {
   } else {
     els.winnerChoice.innerHTML = "";
   }
+}
+
+function loanItems(match) {
+  if (!match?.guests) return [];
+  return Object.entries(match.guests).flatMap(([teamKey, refs]) => (refs || []).map((ref) => ({
+    teamKey,
+    ref,
+    baseTeam: baseTeamOfPlayer(ref)
+  }))).filter((item) => item.baseTeam && item.baseTeam !== item.teamKey);
+}
+
+function hasPendingLoanResolution(match) {
+  return loanItems(match).some((item) => !match.loanResolutions?.[`${item.teamKey}:${item.ref}`]);
+}
+
+function renderLoanResolution(match) {
+  const items = loanItems(match).filter((item) => !match.loanResolutions?.[`${item.teamKey}:${item.ref}`]);
+  if (!items.length) return "";
+  return `
+    <section class="loan-resolution">
+      <p class="eyebrow">Conferencia de jogadores emprestados</p>
+      <h3>Resolva antes da proxima partida</h3>
+      ${items.map((item) => renderLoanResolutionItem(item, match)).join("")}
+    </section>
+  `;
+}
+
+function renderLoanResolutionItem(item, match) {
+  const returnOptions = availableComplementPlayers(item.teamKey, match)
+    .filter((player) => player.id !== item.ref)
+    .map((player) => `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${teamName(baseTeamOfPlayer(player.id) || "", match)})</option>`)
+    .join("");
+  const baseOptions = availableComplementPlayers(item.baseTeam, match)
+    .filter((player) => player.id !== item.ref)
+    .map((player) => `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${teamName(baseTeamOfPlayer(player.id) || "", match)})</option>`)
+    .join("");
+  return `
+    <form class="loan-resolution-card" data-loan-team="${item.teamKey}" data-loan-ref="${item.ref}" data-base-team="${item.baseTeam}">
+      <p><strong>${escapeHtml(playerDisplayName(item.ref))}</strong> estava completando o time <strong>${escapeHtml(teamName(item.teamKey, match))}</strong>. Ele vai voltar para o time base?</p>
+      <div class="loan-options">
+        <label>
+          Sim, ele volta. Quem completa ${escapeHtml(teamName(item.teamKey, match))}?
+          <select name="returnReplacement">
+            <option value="">Ninguem por enquanto</option>
+            ${returnOptions}
+          </select>
+        </label>
+        <button class="secondary-action" name="decision" value="return" type="submit">Volta para base</button>
+      </div>
+      <div class="loan-options">
+        <label>
+          Nao, ele continua. Quem completa ${escapeHtml(teamName(item.baseTeam, match))}?
+          <select name="baseReplacement">
+            <option value="">Ninguem por enquanto</option>
+            ${baseOptions}
+          </select>
+        </label>
+        <button class="primary-action" name="decision" value="stay" type="submit">Continua completando</button>
+      </div>
+    </form>
+  `;
+}
+
+function resolveLoanAfterMatch(form, submitter) {
+  if (!draft.finishedMatch) return;
+  const teamKey = form.dataset.loanTeam;
+  const ref = form.dataset.loanRef;
+  const baseTeam = form.dataset.baseTeam;
+  const decision = submitter?.value || "return";
+  draft.pendingComplements ||= [];
+  if (decision === "return") {
+    const replacement = form.elements.returnReplacement.value;
+    if (replacement) draft.pendingComplements.push({ teamKey, guest: replacement, outgoing: "" });
+  } else {
+    const baseReplacement = form.elements.baseReplacement.value;
+    draft.pendingComplements.push({ teamKey, guest: ref, outgoing: "" });
+    if (baseReplacement) draft.pendingComplements.push({ teamKey: baseTeam, guest: baseReplacement, outgoing: "" });
+  }
+  draft.finishedMatch.loanResolutions ||= {};
+  draft.finishedMatch.loanResolutions[`${teamKey}:${ref}`] = {
+    decision,
+    replacement: decision === "return" ? form.elements.returnReplacement.value : form.elements.baseReplacement.value,
+    resolvedAt: new Date().toISOString()
+  };
+  saveStore();
+  render();
 }
 
 function renderMatchHistoryPreview(extraMatch = null) {
@@ -1660,6 +1801,7 @@ function startMatch(playing, bench) {
     isTimeUp: false,
     startedAt: new Date().toISOString()
   };
+  applyPendingComplementsToCurrentMatch();
   draft.finishedMatch = null;
   draft.finalSummary = null;
   draft.mode = "match";
@@ -1751,6 +1893,10 @@ function editGoalAt(index) {
   els.goalPlayer.value = goal.scorer;
   fillPlayerOptions();
   els.assistPlayer.value = goal.assistant;
+  renderGoalChoiceBoxes(
+    Array.from(els.goalPlayer.options).map((option) => option.value),
+    Array.from(els.assistPlayer.options).map((option) => option.value).filter(Boolean)
+  );
   updateGoalFormState();
 }
 
@@ -3416,14 +3562,14 @@ els.lineupCheck.addEventListener("submit", (event) => {
   const teamKey = form.dataset.completeTeam;
   const ref = form.elements.guest.value;
   const outgoing = form.elements.outgoing.value;
-  if (!ref || !outgoing || ref === outgoing) return;
+  if (!ref || ref === outgoing) return;
   draft.currentMatch.guests[teamKey] ||= [];
   draft.currentMatch.out ||= {};
   draft.currentMatch.out[teamKey] ||= [];
-  if (!draft.currentMatch.out[teamKey].includes(outgoing)) {
+  if (outgoing && !draft.currentMatch.out[teamKey].includes(outgoing)) {
     draft.currentMatch.out[teamKey].push(outgoing);
   }
-  draft.currentMatch.guests[teamKey] = draft.currentMatch.guests[teamKey].filter((item) => item !== outgoing);
+  if (outgoing) draft.currentMatch.guests[teamKey] = draft.currentMatch.guests[teamKey].filter((item) => item !== outgoing);
   if (!draft.currentMatch.guests[teamKey].includes(ref)) {
     draft.currentMatch.guests[teamKey].push(ref);
   }
@@ -3453,9 +3599,32 @@ els.balanceTeams.addEventListener("click", balanceTeamsByPerformance);
 els.startCountdown.addEventListener("click", startCountdown);
 els.fullScoreMode.addEventListener("click", toggleFullScoreMode);
 els.endTimedMatch.addEventListener("click", () => finishCurrentMatch("time"));
+els.resultBand.addEventListener("submit", (event) => {
+  const form = event.target.closest("[data-loan-team]");
+  if (!form) return;
+  event.preventDefault();
+  resolveLoanAfterMatch(form, event.submitter);
+});
 els.goalTeam.addEventListener("change", fillPlayerOptions);
 els.ownGoal.addEventListener("change", fillPlayerOptions);
 els.goalPlayer.addEventListener("change", fillPlayerOptions);
+els.goalForm.addEventListener("click", (event) => {
+  const goalButton = event.target.closest("[data-goal-choice]");
+  if (goalButton) {
+    els.goalPlayer.value = goalButton.dataset.goalChoice;
+    fillPlayerOptions();
+    return;
+  }
+  const assistButton = event.target.closest("[data-assist-choice]");
+  if (assistButton) {
+    els.assistPlayer.value = assistButton.dataset.assistChoice;
+    renderGoalChoiceBoxes(
+      Array.from(els.goalPlayer.options).map((option) => option.value),
+      Array.from(els.assistPlayer.options).map((option) => option.value).filter(Boolean)
+    );
+    updateGoalFormState();
+  }
+});
 els.goalForm.addEventListener("submit", registerGoal);
 els.undoLastGoal.addEventListener("click", undoLastGoal);
 els.leftPanel.addEventListener("click", (event) => {

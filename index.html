@@ -187,8 +187,16 @@
                   <input id="ownGoal" type="checkbox">
                   Gol contra
                 </label>
-                <label>Gol de<select id="goalPlayer"></select></label>
-                <label>Assistencia<select id="assistPlayer"></select></label>
+                <label class="goal-select-hidden">Gol de<select id="goalPlayer"></select></label>
+                <label class="goal-select-hidden">Assistencia<select id="assistPlayer"></select></label>
+                <div class="goal-choice-panel">
+                  <strong>Gol de</strong>
+                  <div class="goal-choice-grid" id="goalPlayerChoices"></div>
+                </div>
+                <div class="goal-choice-panel">
+                  <strong>Assistencia</strong>
+                  <div class="goal-choice-grid" id="assistPlayerChoices"></div>
+                </div>
                 <button class="primary-action" type="submit">Marcar gol</button>
                 <button class="secondary-action" id="undoLastGoal" type="button">Desfazer ultimo gol</button>
               </form>

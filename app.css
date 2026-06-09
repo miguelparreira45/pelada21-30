@@ -725,11 +725,89 @@ p {
   align-items: end;
 }
 
+.loan-resolution {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(155, 227, 29, .35);
+  border-radius: 8px;
+  background: rgba(155, 227, 29, .08);
+}
+
+.loan-resolution-card {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.loan-options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
 .goal-form {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto auto;
+  grid-template-columns: minmax(140px, .7fr) auto minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: end;
+}
+
+.goal-select-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.goal-choice-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.goal-choice-panel strong {
+  color: var(--green);
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.goal-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(118px, 1fr));
+  gap: 8px;
+}
+
+.player-choice {
+  min-height: 44px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #0b0f0b;
+  font-weight: 900;
+  text-align: center;
+}
+
+.player-choice.selected {
+  color: #071006;
+  border-color: var(--green);
+  background: var(--green);
+  box-shadow: 0 0 0 2px rgba(155, 227, 29, .18);
+}
+
+.choice-empty {
+  display: block;
+  padding: 12px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .own-goal-toggle {
@@ -1330,6 +1408,7 @@ p {
   .inline-form,
   .settings-form,
   .complete-form,
+  .loan-options,
   .share-link-box,
   .ranking-row {
     width: 100%;
