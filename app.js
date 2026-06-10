@@ -53,6 +53,7 @@ let draft = null;
 let timerId = null;
 let pendingRecovery = null;
 let activeDataTab = "today";
+let financePaymentFilters = { search: "", month: "", day: "" };
 let editingSessionId = null;
 let supabaseClient = null;
 let currentUser = null;
@@ -2438,6 +2439,7 @@ function renderFinance() {
 
     <section class="data-card finance-wide">
       <h3>Pagamentos</h3>
+      ${renderPaymentFilters()}
       ${renderPaymentColumns(finance.payments)}
     </section>
 
@@ -2478,10 +2480,29 @@ function financeSummary() {
   return { received, pending, expenses, balance };
 }
 
+function renderPaymentFilters() {
+  return `
+    <div class="finance-filters">
+      <label>Pesquisar jogador
+        <input type="search" data-payment-search value="${escapeHtml(financePaymentFilters.search)}" placeholder="Nome do jogador">
+      </label>
+      <label>Filtrar por mês
+        <input type="month" data-payment-month value="${escapeHtml(financePaymentFilters.month)}">
+      </label>
+      <label>Filtrar por dia
+        <input type="date" data-payment-day value="${escapeHtml(financePaymentFilters.day)}">
+      </label>
+      <button class="secondary-action" data-apply-payment-filters type="button">Aplicar filtros</button>
+      <button class="secondary-action" data-clear-payment-filters type="button">Limpar filtros</button>
+    </div>
+  `;
+}
+
 function renderPaymentColumns(payments) {
-  const sorted = payments.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const hasFilter = hasFinancePaymentFilter();
+  const sorted = filterPayments(payments).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   const monthly = sorted.filter((item) => item.kind === "mensalista");
-  const substitutes = sorted.filter((item) => item.kind === "suplente" && item.status === "pending");
+  const substitutes = sorted.filter((item) => item.kind === "suplente" && (item.status === "pending" || hasFilter));
   return `
     <div class="payment-columns">
       <section class="payment-column">
@@ -2499,11 +2520,32 @@ function renderPaymentColumns(payments) {
           <span>${substitutes.length} pendente(s)</span>
         </div>
         <div class="finance-list">
-          ${substitutes.length ? substitutes.map((item) => renderPaymentRow(item, "suplente")).join("") : "<p>Nenhum suplente pendente.</p>"}
+          ${substitutes.length ? substitutes.map((item) => renderPaymentRow(item, "suplente")).join("") : `<p>${hasFilter ? "Nenhum suplente encontrado nesse filtro." : "Nenhum suplente pendente."}</p>`}
         </div>
       </section>
     </div>
   `;
+}
+
+function hasFinancePaymentFilter() {
+  return Boolean(financePaymentFilters.search || financePaymentFilters.month || financePaymentFilters.day);
+}
+
+function filterPayments(payments) {
+  const search = normalizeText(financePaymentFilters.search);
+  return payments.filter((item) => {
+    const name = normalizeText(item.playerName || playerDisplayName(item.playerId));
+    const date = paymentFilterDate(item);
+    const month = date ? date.slice(0, 7) : "";
+    if (search && !name.includes(search)) return false;
+    if (financePaymentFilters.month && month !== financePaymentFilters.month) return false;
+    if (financePaymentFilters.day && date !== financePaymentFilters.day) return false;
+    return true;
+  });
+}
+
+function paymentFilterDate(item) {
+  return String(item.dueDate || item.paidAt || item.createdAt || "").slice(0, 10);
 }
 
 function renderPaymentRow(item, column = item.kind) {
@@ -2522,6 +2564,8 @@ function renderPaymentRow(item, column = item.kind) {
         ${item.status === "pending" ? `<button class="primary-action" data-mark-paid="${item.id}" type="button">Pago</button>` : ""}
         ${column === "suplente" && item.status === "pending" ? `<button class="secondary-action" data-mark-free="${item.id}" type="button">Jogou grátis</button>` : ""}
         ${player?.whatsapp ? `<button class="secondary-action" data-charge-whatsapp="${item.id}" type="button">WhatsApp</button>` : ""}
+        <button class="secondary-action" data-edit-payment="${item.id}" type="button">Editar</button>
+        <button class="danger-action" data-delete-payment="${item.id}" type="button">Apagar</button>
       </div>
     </article>
   `;
@@ -2545,6 +2589,7 @@ function renderExpenseRow(item) {
       </div>
       <div class="card-actions">
         ${item.status === "future" ? `<button class="primary-action" data-pay-expense="${item.id}" type="button">Marcar pago</button>` : ""}
+        <button class="secondary-action" data-edit-expense="${item.id}" type="button">Editar</button>
         <button class="danger-action" data-delete-expense="${item.id}" type="button">Apagar</button>
       </div>
     </article>
@@ -2765,11 +2810,61 @@ function updatePaymentStatus(id, status) {
   renderFinance();
 }
 
+function editPayment(id) {
+  const payment = profile.finance.payments.find((item) => item.id === id);
+  if (!payment) return;
+  const amount = prompt("Valor da cobrança", formatMoneyInput(payment.amount));
+  if (amount === null) return;
+  const dueDate = prompt("Data de vencimento (aaaa-mm-dd)", String(payment.dueDate || "").slice(0, 10));
+  if (dueDate === null) return;
+  const status = prompt("Status: pendente, pago ou grátis", paymentStatusLabel(payment.status || "pending"));
+  if (status === null) return;
+  const normalizedStatus = parsePaymentStatus(status, payment.status);
+  const note = prompt("Observação/motivo", payment.note || "");
+  if (note === null) return;
+  payment.amount = parseMoneyInput(amount);
+  payment.dueDate = dueDate || payment.dueDate;
+  payment.status = normalizedStatus;
+  payment.note = note.trim();
+  payment.paidAt = normalizedStatus === "paid" ? (payment.paidAt || new Date().toISOString()) : "";
+  payment.freeAt = normalizedStatus === "free" ? (payment.freeAt || new Date().toISOString()) : "";
+  saveStore();
+  renderFinance();
+}
+
+function deletePayment(id) {
+  if (!confirm("Apagar esta cobrança? Use apenas quando a cobrança foi criada por erro.")) return;
+  profile.finance.payments = profile.finance.payments.filter((item) => item.id !== id);
+  saveStore();
+  renderFinance();
+}
+
 function updateExpenseStatus(id, status) {
   const expense = profile.finance.expenses.find((item) => item.id === id);
   if (!expense) return;
   expense.status = status;
   expense.paidAt = new Date().toISOString();
+  saveStore();
+  renderFinance();
+}
+
+function editExpense(id) {
+  const expense = profile.finance.expenses.find((item) => item.id === id);
+  if (!expense) return;
+  const description = prompt("Descrição da saída", expense.description || "");
+  if (description === null) return;
+  const amount = prompt("Valor da saída", formatMoneyInput(expense.amount));
+  if (amount === null) return;
+  const dueDate = prompt("Data de vencimento (aaaa-mm-dd)", String(expense.dueDate || "").slice(0, 10));
+  if (dueDate === null) return;
+  const status = prompt("Status: pago ou futuro", expense.status === "future" ? "futuro" : "pago");
+  if (status === null) return;
+  const normalizedStatus = parseExpenseStatus(status, expense.status);
+  expense.description = description.trim() || expense.description;
+  expense.amount = parseMoneyInput(amount);
+  expense.dueDate = dueDate || expense.dueDate;
+  expense.status = normalizedStatus;
+  expense.paidAt = normalizedStatus === "paid" ? (expense.paidAt || new Date().toISOString()) : "";
   saveStore();
   renderFinance();
 }
@@ -2930,6 +3025,21 @@ function paymentStatusLabel(status) {
   if (status === "paid") return "pago";
   if (status === "free") return "isento";
   return "pendente";
+}
+
+function parsePaymentStatus(value, fallback = "pending") {
+  const text = normalizeText(value);
+  if (["paid", "pago", "pagou"].includes(text)) return "paid";
+  if (["free", "gratis", "gratuito", "isento"].includes(text)) return "free";
+  if (["pending", "pendente", "atrasado"].includes(text)) return "pending";
+  return fallback;
+}
+
+function parseExpenseStatus(value, fallback = "paid") {
+  const text = normalizeText(value);
+  if (["future", "futuro", "futura", "pendente"].includes(text)) return "future";
+  if (["paid", "pago", "paga"].includes(text)) return "paid";
+  return fallback;
 }
 
 async function copyFinanceReport() {
@@ -4389,6 +4499,25 @@ els.financeGrid.addEventListener("submit", (event) => {
   if (event.target.matches("#financeSettingsForm")) saveFinanceSettings(event);
   if (event.target.matches("#financeExpenseForm")) addFinanceExpense(event);
 });
+els.financeGrid.addEventListener("input", (event) => {
+  if (event.target.matches("[data-payment-search]")) {
+    financePaymentFilters.search = event.target.value;
+  }
+});
+els.financeGrid.addEventListener("change", (event) => {
+  if (event.target.matches("[data-payment-search]")) {
+    financePaymentFilters.search = event.target.value;
+    renderFinance();
+  }
+  if (event.target.matches("[data-payment-month]")) {
+    financePaymentFilters.month = event.target.value;
+    renderFinance();
+  }
+  if (event.target.matches("[data-payment-day]")) {
+    financePaymentFilters.day = event.target.value;
+    renderFinance();
+  }
+});
 els.financeGrid.addEventListener("click", (event) => {
   const monthly = event.target.closest("[data-create-monthly-charges]");
   if (monthly) {
@@ -4431,13 +4560,46 @@ els.financeGrid.addEventListener("click", (event) => {
     openPaymentWhatsapp(charge.dataset.chargeWhatsapp);
     return;
   }
+  const editPaymentButton = event.target.closest("[data-edit-payment]");
+  if (editPaymentButton) {
+    editPayment(editPaymentButton.dataset.editPayment);
+    return;
+  }
+  const deletePaymentButton = event.target.closest("[data-delete-payment]");
+  if (deletePaymentButton) {
+    deletePayment(deletePaymentButton.dataset.deletePayment);
+    return;
+  }
   const payExpense = event.target.closest("[data-pay-expense]");
   if (payExpense) {
     updateExpenseStatus(payExpense.dataset.payExpense, "paid");
     return;
   }
+  const editExpenseButton = event.target.closest("[data-edit-expense]");
+  if (editExpenseButton) {
+    editExpense(editExpenseButton.dataset.editExpense);
+    return;
+  }
   const deleteExpenseButton = event.target.closest("[data-delete-expense]");
   if (deleteExpenseButton) deleteExpense(deleteExpenseButton.dataset.deleteExpense);
+  const applyFilters = event.target.closest("[data-apply-payment-filters]");
+  if (applyFilters) {
+    const search = els.financeGrid.querySelector("[data-payment-search]");
+    const month = els.financeGrid.querySelector("[data-payment-month]");
+    const day = els.financeGrid.querySelector("[data-payment-day]");
+    financePaymentFilters = {
+      search: search?.value || "",
+      month: month?.value || "",
+      day: day?.value || ""
+    };
+    renderFinance();
+    return;
+  }
+  const clearFilters = event.target.closest("[data-clear-payment-filters]");
+  if (clearFilters) {
+    financePaymentFilters = { search: "", month: "", day: "" };
+    renderFinance();
+  }
 });
 els.shareGrid.addEventListener("click", (event) => {
   const rescueButton = event.target.closest("[data-rescue-summary]");
