@@ -33,6 +33,20 @@ const DEFAULT_SETTINGS = {
   drawTieRule: "decide-stay"
 };
 
+const DEFAULT_FINANCE = {
+  settings: {
+    monthlyAmount: 0,
+    substituteAmount: 0,
+    monthlyFrequency: "mensal",
+    monthlyChargeDay: 10,
+    pixKey: "",
+    cashInitial: 0
+  },
+  payments: [],
+  expenses: [],
+  publicShares: {}
+};
+
 let store = loadStore();
 let profile = null;
 let draft = null;
@@ -58,6 +72,9 @@ const els = {
   syncBadge: document.querySelector("#syncBadge"),
   gameTab: document.querySelector("#gameTab"),
   playersTab: document.querySelector("#playersTab"),
+  financeTab: document.querySelector("#financeTab"),
+  financeGrid: document.querySelector("#financeGrid"),
+  publishFinanceShare: document.querySelector("#publishFinanceShare"),
   dataTab: document.querySelector("#dataTab"),
   shareTab: document.querySelector("#shareTab"),
   shareGrid: document.querySelector("#shareGrid"),
@@ -194,6 +211,7 @@ async function loadCloudProfile(user) {
     username: profileRow.username,
     email: profileRow.email,
     phone: profileRow.phone,
+    finance: profileRow.finance || structuredClone(DEFAULT_FINANCE),
     currentSeasonId: profileRow.current_season_id,
     createdAt: profileRow.created_at,
     seasons: mappedSeasons,
@@ -219,6 +237,7 @@ function fromPlayerRow(row) {
     firstName: row.first_name,
     lastName: row.last_name,
     memberType: row.member_type,
+    whatsapp: row.whatsapp || "",
     photo: row.photo_path || "",
     createdAt: row.created_at
   };
@@ -293,7 +312,8 @@ async function saveCloudState() {
     username: profile.username,
     email: profile.email,
     phone: profile.phone,
-    current_season_id: profile.currentSeasonId
+    current_season_id: profile.currentSeasonId,
+    finance: profile.finance || DEFAULT_FINANCE
   }).eq("id", currentUser.id);
 
   await Promise.all(profile.sessions.map((session) =>
@@ -303,6 +323,24 @@ async function saveCloudState() {
   await Promise.all(profile.seasons.map((season) =>
     supabaseClient.from("seasons").upsert(toSeasonRow(season))
   ));
+}
+
+async function upsertPlayerCloud(player) {
+  const row = {
+    id: player.id,
+    profile_id: currentUser.id,
+    first_name: player.firstName,
+    last_name: player.lastName,
+    member_type: player.memberType,
+    whatsapp: player.whatsapp || null,
+    photo_path: player.photo || null
+  };
+  let { error } = await supabaseClient.from("players").upsert(row);
+  if (error && String(error.message || "").includes("whatsapp")) {
+    const { whatsapp, ...fallback } = row;
+    ({ error } = await supabaseClient.from("players").upsert(fallback));
+  }
+  return { error };
 }
 
 function findLocalProfileForCloud(cloudProfile) {
@@ -360,14 +398,7 @@ async function migrateLocalProfileToCloudIfNeeded(cloudProfile) {
     if (!target) {
       target = { ...player, id: crypto.randomUUID() };
       cloudProfile.players.push(target);
-      await supabaseClient.from("players").insert({
-        id: target.id,
-        profile_id: currentUser.id,
-        first_name: target.firstName,
-        last_name: target.lastName,
-        member_type: target.memberType,
-        photo_path: target.photo || null
-      });
+      await upsertPlayerCloud(target);
       existingPlayerNames.add(fullName);
     }
     playerIdMap[player.id] = target.id;
@@ -482,6 +513,11 @@ function ensureProfileDefaults(item) {
   item.players ||= [];
   item.seasons ||= [];
   item.publicShares ||= {};
+  item.finance ||= structuredClone(DEFAULT_FINANCE);
+  item.finance.settings = { ...DEFAULT_FINANCE.settings, ...(item.finance.settings || {}) };
+  item.finance.payments ||= [];
+  item.finance.expenses ||= [];
+  item.finance.publicShares ||= {};
   removeEmptySuggestedSeason(item);
   if (!item.currentSeasonId || !item.seasons.some((season) => season.id === item.currentSeasonId && !season.finishedAt)) {
     item.currentSeasonId = activeSeason(item)?.id || null;
@@ -534,7 +570,14 @@ function normalizeText(value) {
 }
 
 function onlyDigits(value) {
-  return value.replace(/\D/g, "");
+  return String(value || "").replace(/\D/g, "");
+}
+
+function formatPhone(value) {
+  const digits = onlyDigits(value);
+  if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+  if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+  return digits || "";
 }
 
 async function hashPassword(password) {
@@ -579,9 +622,11 @@ function showAppTab(tab) {
   });
   els.gameTab.classList.toggle("hidden", tab !== "game");
   els.playersTab.classList.toggle("hidden", tab !== "players");
+  els.financeTab.classList.toggle("hidden", tab !== "finance");
   els.dataTab.classList.toggle("hidden", tab !== "data");
   els.shareTab.classList.toggle("hidden", tab !== "share");
   if (tab === "players") renderPlayers();
+  if (tab === "finance") renderFinance();
   if (tab === "data") renderData();
   if (tab === "share") renderShare();
 }
@@ -1075,7 +1120,7 @@ function renderRegisteredPlayerCard(player) {
       ${renderPlayerAvatar(player.id)}
       <div>
         <strong>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</strong>
-        <span>${player.memberType === "mensalista" ? "Mensalista" : "Suplente"} | Nota ${stats.rating || "3.0"} | Forma ${Math.round(playerPower(player.id))}</span>
+        <span>${player.memberType === "mensalista" ? "Mensalista" : "Suplente"} | ${player.whatsapp ? `WhatsApp ${escapeHtml(formatPhone(player.whatsapp))} | ` : ""}Nota ${stats.rating || "3.0"} | Forma ${Math.round(playerPower(player.id))}</span>
         <div class="player-metrics">
           <small>${stats.goals} G</small>
           <small>${stats.assists} A</small>
@@ -1115,6 +1160,7 @@ async function savePlayerProfile(event) {
     firstName: data.get("firstName").trim(),
     lastName: data.get("lastName").trim(),
     memberType: data.get("memberType"),
+    whatsapp: onlyDigits(data.get("whatsapp") || ""),
     photo,
     createdAt: existing?.createdAt || new Date().toISOString()
   };
@@ -1124,14 +1170,7 @@ async function savePlayerProfile(event) {
   else profile.players.push(player);
 
   if (isCloudMode) {
-    const { error } = await supabaseClient.from("players").upsert({
-      id: player.id,
-      profile_id: currentUser.id,
-      first_name: player.firstName,
-      last_name: player.lastName,
-      member_type: player.memberType,
-      photo_path: player.photo || null
-    });
+    const { error } = await upsertPlayerCloud(player);
     if (error) {
       alert("Nao foi possivel salvar o jogador na nuvem.");
       console.warn(error);
@@ -1162,6 +1201,7 @@ function editPlayerProfile(playerId) {
   els.playerProfileForm.elements.playerId.value = player.id;
   els.playerProfileForm.elements.firstName.value = player.firstName;
   els.playerProfileForm.elements.lastName.value = player.lastName;
+  els.playerProfileForm.elements.whatsapp.value = player.whatsapp || "";
   els.playerProfileForm.elements.memberType.value = player.memberType;
   renderPlayers();
   els.playerProfileForm.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -2068,6 +2108,7 @@ async function completeSessionRatings(event) {
   });
   const summary = buildSessionSummary();
   profile.sessions.push(summary);
+  generateSubstituteChargesForSession(summary);
   draft.finalSummary = summary;
   draft.mode = "final";
   saveStore();
@@ -2326,6 +2367,487 @@ function renderShare() {
     </section>
     ${renderPublicPayload(payload, true)}
   `;
+}
+
+function renderFinance() {
+  ensureProfileDefaults(profile);
+  const finance = profile.finance;
+  const summary = financeSummary();
+  els.financeGrid.innerHTML = `
+    <section class="data-card finance-summary-card">
+      <div class="leader-grid">
+        <div class="leader-box"><span>Saldo em caixa</span><strong>${money(summary.balance)}</strong></div>
+        <div class="leader-box"><span>A receber</span><strong>${money(summary.pending)}</strong></div>
+        <div class="leader-box"><span>Recebido</span><strong>${money(summary.received)}</strong></div>
+        <div class="leader-box"><span>Despesas</span><strong>${money(summary.expenses)}</strong></div>
+      </div>
+    </section>
+
+    <section class="data-card">
+      <h3>Configurações de cobrança</h3>
+      <form class="finance-form" id="financeSettingsForm">
+        <label>Valor mensalista<input name="monthlyAmount" type="number" min="0" step="0.01" value="${finance.settings.monthlyAmount || 0}"></label>
+        <label>Valor suplente<input name="substituteAmount" type="number" min="0" step="0.01" value="${finance.settings.substituteAmount || 0}"></label>
+        <label>Prazo mensalista
+          <select name="monthlyFrequency">
+            ${["semanal", "quinzenal", "mensal"].map((item) => `<option value="${item}" ${finance.settings.monthlyFrequency === item ? "selected" : ""}>${capitalize(item)}</option>`).join("")}
+          </select>
+        </label>
+        <label>Dia de cobrança<input name="monthlyChargeDay" type="number" min="1" max="31" value="${finance.settings.monthlyChargeDay || 10}"></label>
+        <label>Chave de pagamento<input name="pixKey" value="${escapeHtml(finance.settings.pixKey || "")}" placeholder="Pix, telefone ou email"></label>
+        <label>Caixa inicial<input name="cashInitial" type="number" min="0" step="0.01" value="${finance.settings.cashInitial || 0}"></label>
+        <button class="primary-action" type="submit">Salvar financeiro</button>
+      </form>
+    </section>
+
+    <section class="data-card">
+      <h3>Ações rápidas</h3>
+      <div class="finance-actions">
+        <button class="secondary-action" data-create-monthly-charges type="button">Criar cobranças dos mensalistas</button>
+        <button class="secondary-action" data-copy-finance-report type="button">Copiar prestação de contas</button>
+      </div>
+      <p class="share-status" id="financeStatus"></p>
+    </section>
+
+    <section class="data-card finance-wide">
+      <h3>Enviar resumo da última pelada</h3>
+      ${renderLatestSessionWhatsAppButtons()}
+    </section>
+
+    <section class="data-card">
+      <h3>Nova saída do caixa</h3>
+      <form class="finance-form" id="financeExpenseForm">
+        <label>Descrição<input name="description" placeholder="Quadra, goleiro, churrasco..." required></label>
+        <label>Valor<input name="amount" type="number" min="0" step="0.01" required></label>
+        <label>Vencimento<input name="dueDate" type="date"></label>
+        <label>Status
+          <select name="status">
+            <option value="paid">Pago agora</option>
+            <option value="future">Conta futura</option>
+          </select>
+        </label>
+        <button class="primary-action" type="submit">Adicionar saída</button>
+      </form>
+    </section>
+
+    <section class="data-card finance-wide">
+      <h3>Pagamentos</h3>
+      <div class="finance-list">
+        ${finance.payments.length ? finance.payments.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(renderPaymentRow).join("") : "<p>Nenhuma cobrança criada ainda.</p>"}
+      </div>
+    </section>
+
+    <section class="data-card finance-wide">
+      <h3>Caixa e contas</h3>
+      <div class="finance-list">
+        ${finance.expenses.length ? finance.expenses.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(renderExpenseRow).join("") : "<p>Nenhuma saída registrada.</p>"}
+      </div>
+    </section>
+  `;
+}
+
+function money(value) {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function capitalize(value) {
+  return String(value || "").slice(0, 1).toUpperCase() + String(value || "").slice(1);
+}
+
+function financeSummary() {
+  const finance = profile.finance || structuredClone(DEFAULT_FINANCE);
+  const received = finance.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const pending = finance.payments.filter((item) => item.status === "pending").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const expenses = finance.expenses.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
+  const balance = Number(finance.settings.cashInitial || 0) + received - expenses;
+  return { received, pending, expenses, balance };
+}
+
+function renderPaymentRow(item) {
+  const player = profile.players.find((entry) => entry.id === item.playerId);
+  const free = item.status === "free";
+  return `
+    <article class="finance-row ${item.status}">
+      <div>
+        <strong>${escapeHtml(item.playerName || playerDisplayName(item.playerId))}</strong>
+        <span>${item.kind === "mensalista" ? "Mensalista" : "Suplente"} | ${money(item.amount)} | ${new Date(item.dueDate || item.createdAt).toLocaleDateString("pt-BR")}</span>
+        ${item.note ? `<small>${escapeHtml(item.note)}</small>` : ""}
+        ${item.kind === "suplente" && item.status === "pending" ? `<small>${pendingSubstituteCount(item.playerId)} pelada(s) pendente(s)</small>` : ""}
+      </div>
+      <div class="card-actions">
+        ${item.status === "pending" ? `<button class="primary-action" data-mark-paid="${item.id}" type="button">Pago</button>` : ""}
+        ${item.status === "pending" ? `<button class="secondary-action" data-mark-free="${item.id}" type="button">Jogou grátis</button>` : ""}
+        ${player?.whatsapp ? `<button class="secondary-action" data-charge-whatsapp="${item.id}" type="button">WhatsApp</button>` : ""}
+        <button class="danger-action" data-delete-payment="${item.id}" type="button">Apagar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderExpenseRow(item) {
+  return `
+    <article class="finance-row ${item.status}">
+      <div>
+        <strong>${escapeHtml(item.description)}</strong>
+        <span>${money(item.amount)} | ${item.status === "future" ? "Conta futura" : "Pago"} | ${new Date(item.dueDate || item.createdAt).toLocaleDateString("pt-BR")}</span>
+      </div>
+      <div class="card-actions">
+        ${item.status === "future" ? `<button class="primary-action" data-pay-expense="${item.id}" type="button">Marcar pago</button>` : ""}
+        <button class="danger-action" data-delete-expense="${item.id}" type="button">Apagar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLatestSessionWhatsAppButtons() {
+  const latest = (profile.sessions || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  if (!latest) return "<p>Finalize uma pelada para enviar o resumo aos jogadores.</p>";
+  const link = latestPublicShareLink();
+  if (!link) return "<p>Gere o link público na aba Compartilhar antes de enviar o resumo.</p>";
+  const participantIds = new Set((latest.stats || []).map((item) => item.playerId || item.id));
+  const targets = profile.players.filter((player) => participantIds.has(player.id));
+  if (!targets.length) return "<p>Nenhum participante encontrado na última pelada.</p>";
+  return `
+    <div class="finance-list">
+      ${targets.map((player) => {
+        const message = dailySummaryMessage(player, link);
+        return `
+          <article class="finance-row">
+            <div>
+              <strong>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</strong>
+              <span>${player.whatsapp ? formatPhone(player.whatsapp) : "Sem WhatsApp cadastrado"}</span>
+            </div>
+            <div class="card-actions">
+              ${player.whatsapp ? `<a class="secondary-action" href="${whatsappUrl(player.whatsapp, message)}" target="_blank" rel="noopener">Enviar WhatsApp</a>` : `<button class="secondary-action" data-edit-player="${player.id}" type="button">Cadastrar WhatsApp</button>`}
+            </div>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+}
+
+function dailySummaryMessage(player, link) {
+  return `Fala, ${player.firstName}! Saiu o resumo da pelada de hoje no PeladaFast:\n${link}\n\nTem placares, gols, assistências, rankings e o resumo para story.`;
+}
+
+function pendingSubstituteCount(playerId) {
+  return (profile.finance?.payments || []).filter((item) => item.playerId === playerId && item.kind === "suplente" && item.status === "pending").length;
+}
+
+function saveFinanceSettings(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  profile.finance.settings = {
+    monthlyAmount: Number(data.get("monthlyAmount")) || 0,
+    substituteAmount: Number(data.get("substituteAmount")) || 0,
+    monthlyFrequency: data.get("monthlyFrequency") || "mensal",
+    monthlyChargeDay: Math.max(1, Math.min(31, Number(data.get("monthlyChargeDay")) || 10)),
+    pixKey: String(data.get("pixKey") || "").trim(),
+    cashInitial: Number(data.get("cashInitial")) || 0
+  };
+  saveStore();
+  renderFinance();
+}
+
+function addFinanceExpense(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  profile.finance.expenses.push({
+    id: crypto.randomUUID(),
+    description: String(data.get("description") || "").trim(),
+    amount: Number(data.get("amount")) || 0,
+    dueDate: data.get("dueDate") || new Date().toISOString().slice(0, 10),
+    status: data.get("status") || "paid",
+    createdAt: new Date().toISOString()
+  });
+  saveStore();
+  renderFinance();
+}
+
+function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note = "" }) {
+  const player = profile.players.find((item) => item.id === playerId);
+  if (!player || !amount) return null;
+  const existing = profile.finance.payments.find((item) =>
+    item.playerId === playerId && item.kind === kind && item.sessionId === sessionId && item.dueDate === dueDate
+  );
+  if (existing) return existing;
+  const payment = {
+    id: crypto.randomUUID(),
+    playerId,
+    playerName: `${player.firstName} ${player.lastName}`.trim(),
+    kind,
+    amount,
+    dueDate,
+    sessionId,
+    note,
+    status: "pending",
+    createdAt: new Date().toISOString()
+  };
+  profile.finance.payments.push(payment);
+  return payment;
+}
+
+function createMonthlyCharges() {
+  const settings = profile.finance.settings;
+  const amount = Number(settings.monthlyAmount) || 0;
+  if (!amount) {
+    alert("Defina o valor do mensalista primeiro.");
+    return;
+  }
+  const dueDate = nextChargeDate(settings.monthlyChargeDay);
+  profile.players
+    .filter((player) => player.memberType === "mensalista")
+    .forEach((player) => createPayment({
+      playerId: player.id,
+      kind: "mensalista",
+      amount,
+      dueDate,
+      note: `Cobrança ${settings.monthlyFrequency}`
+    }));
+  saveStore();
+  renderFinance();
+}
+
+function nextChargeDate(day) {
+  const now = new Date();
+  const date = new Date(now.getFullYear(), now.getMonth(), Math.min(Number(day) || 10, 28));
+  if (date < new Date(now.toDateString())) date.setMonth(date.getMonth() + 1);
+  return date.toISOString().slice(0, 10);
+}
+
+function generateSubstituteChargesForSession(session) {
+  ensureProfileDefaults(profile);
+  const amount = Number(profile.finance.settings.substituteAmount) || 0;
+  if (!amount) return;
+  const dueDate = new Date(session.date).toISOString().slice(0, 10);
+  const participantIds = new Set((session.stats || []).map((item) => item.playerId || item.id));
+  profile.players
+    .filter((player) => participantIds.has(player.id) && player.memberType === "suplente")
+    .forEach((player) => createPayment({
+      playerId: player.id,
+      kind: "suplente",
+      amount,
+      dueDate,
+      sessionId: session.id,
+      note: `Pelada de ${new Date(session.date).toLocaleDateString("pt-BR")}`
+    }));
+}
+
+function updatePaymentStatus(id, status) {
+  const payment = profile.finance.payments.find((item) => item.id === id);
+  if (!payment) return;
+  payment.status = status;
+  payment.paidAt = status === "paid" ? new Date().toISOString() : payment.paidAt || "";
+  if (status === "free") {
+    const reason = prompt("Motivo da isenção?", "Jogou grátis por consenso da pelada") || "Jogou grátis por consenso da pelada";
+    payment.note = reason;
+    payment.freeAt = new Date().toISOString();
+  }
+  saveStore();
+  renderFinance();
+}
+
+function deletePayment(id) {
+  if (!confirm("Apagar esta cobrança?")) return;
+  profile.finance.payments = profile.finance.payments.filter((item) => item.id !== id);
+  saveStore();
+  renderFinance();
+}
+
+function updateExpenseStatus(id, status) {
+  const expense = profile.finance.expenses.find((item) => item.id === id);
+  if (!expense) return;
+  expense.status = status;
+  expense.paidAt = new Date().toISOString();
+  saveStore();
+  renderFinance();
+}
+
+function deleteExpense(id) {
+  if (!confirm("Apagar esta saída?")) return;
+  profile.finance.expenses = profile.finance.expenses.filter((item) => item.id !== id);
+  saveStore();
+  renderFinance();
+}
+
+function whatsappUrl(phone, text) {
+  const digits = onlyDigits(phone);
+  if (!digits) return "";
+  const withCountry = digits.startsWith("55") ? digits : `55${digits}`;
+  return `https://wa.me/${withCountry}?text=${encodeURIComponent(text)}`;
+}
+
+function paymentMessage(payment) {
+  const settings = profile.finance.settings;
+  return [
+    `Fala, ${payment.playerName}!`,
+    `Cobrança da ${profile.peladaName}: ${money(payment.amount)}.`,
+    payment.note ? payment.note : "",
+    settings.pixKey ? `Chave de pagamento: ${settings.pixKey}` : "",
+    "Quando pagar, avisa o admin da pelada. Valeu!"
+  ].filter(Boolean).join("\n");
+}
+
+function openPaymentWhatsapp(id) {
+  const payment = profile.finance.payments.find((item) => item.id === id);
+  const player = profile.players.find((item) => item.id === payment?.playerId);
+  const url = player?.whatsapp ? whatsappUrl(player.whatsapp, paymentMessage(payment)) : "";
+  if (!url) {
+    alert("Esse jogador ainda não tem WhatsApp cadastrado.");
+    return;
+  }
+  window.open(url, "_blank");
+}
+
+function latestPublicShareLink() {
+  const season = currentSeason();
+  const slug = season ? profile.publicShares?.[season.id] : "";
+  return slug ? publicShareUrl(slug) : "";
+}
+
+function openDailySummaryWhatsapp() {
+  const latest = (profile.sessions || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+  const link = latestPublicShareLink();
+  if (!latest || !link) {
+    alert("Gere o link público da aba Compartilhar antes de enviar para os jogadores.");
+    return;
+  }
+  const participantIds = new Set((latest.stats || []).map((item) => item.playerId || item.id));
+  const targets = profile.players.filter((player) => participantIds.has(player.id) && player.whatsapp);
+  if (!targets.length) {
+    alert("Nenhum jogador que participou tem WhatsApp cadastrado.");
+    return;
+  }
+  const first = targets[0];
+  const message = `Fala, ${first.firstName}! Saiu o resumo da pelada de hoje no PeladaFast:\n${link}\n\nTem placares, gols, assistências, rankings e o resumo para story.`;
+  window.open(whatsappUrl(first.whatsapp, message), "_blank");
+  const status = document.querySelector("#financeStatus");
+  if (status) status.textContent = `Abrindo WhatsApp do primeiro jogador. Repita para os demais na lista de pagamentos ou pelo cadastro.`;
+}
+
+function financeReportText() {
+  const summary = financeSummary();
+  const recentPayments = profile.finance.payments.slice(-8).map((item) => `+ ${item.playerName}: ${money(item.amount)} (${paymentStatusLabel(item.status)})`);
+  const recentExpenses = profile.finance.expenses.slice(-8).map((item) => `- ${item.description}: ${money(item.amount)} (${item.status === "future" ? "futura" : "paga"})`);
+  return [
+    `Prestação de contas - ${profile.peladaName}`,
+    `Saldo atual: ${money(summary.balance)}`,
+    `Recebido: ${money(summary.received)}`,
+    `A receber: ${money(summary.pending)}`,
+    `Despesas pagas: ${money(summary.expenses)}`,
+    "",
+    "Últimas entradas:",
+    recentPayments.join("\n") || "Sem entradas.",
+    "",
+    "Últimas saídas:",
+    recentExpenses.join("\n") || "Sem saídas."
+  ].join("\n");
+}
+
+function paymentStatusLabel(status) {
+  if (status === "paid") return "pago";
+  if (status === "free") return "isento";
+  return "pendente";
+}
+
+async function copyFinanceReport() {
+  const text = financeReportText();
+  await navigator.clipboard?.writeText(text).catch(() => {});
+  const status = document.querySelector("#financeStatus");
+  if (status) status.textContent = "Prestação de contas copiada.";
+}
+
+function buildFinancePayload() {
+  const summary = financeSummary();
+  const finance = profile.finance || structuredClone(DEFAULT_FINANCE);
+  return {
+    type: "finance",
+    profile: {
+      peladaName: profile?.peladaName || "PeladaFast",
+      username: profile?.username || "pelada"
+    },
+    generatedAt: new Date().toISOString(),
+    summary,
+    pixKey: finance.settings.pixKey || "",
+    payments: finance.payments
+      .filter((item) => item.status !== "pending")
+      .slice(-12)
+      .map((item) => ({
+        name: item.playerName,
+        amount: item.amount,
+        status: paymentStatusLabel(item.status),
+        date: item.paidAt || item.createdAt
+      })),
+    pending: finance.payments
+      .filter((item) => item.status === "pending")
+      .slice(-12)
+      .map((item) => ({ name: item.playerName, amount: item.amount, dueDate: item.dueDate })),
+    expenses: finance.expenses
+      .slice(-12)
+      .map((item) => ({ description: item.description, amount: item.amount, status: item.status, dueDate: item.dueDate || item.createdAt }))
+  };
+}
+
+function renderPublicFinancePayload(payload) {
+  return `
+    <section class="data-card public-summary-card">
+      <p class="eyebrow">Prestação de contas</p>
+      <h3>${escapeHtml(payload.profile?.peladaName || "PeladaFast")}</h3>
+      <div class="leader-grid">
+        <div class="leader-box"><span>Saldo atual</span><strong>${money(payload.summary?.balance)}</strong></div>
+        <div class="leader-box"><span>Recebido</span><strong>${money(payload.summary?.received)}</strong></div>
+        <div class="leader-box"><span>A receber</span><strong>${money(payload.summary?.pending)}</strong></div>
+        <div class="leader-box"><span>Despesas</span><strong>${money(payload.summary?.expenses)}</strong></div>
+      </div>
+      ${payload.pixKey ? `<p class="share-status">Chave de pagamento: ${escapeHtml(payload.pixKey)}</p>` : ""}
+    </section>
+    <section class="data-card ranking-card">
+      <h3>Últimas entradas</h3>
+      <div class="data-list">
+        ${payload.payments?.length ? payload.payments.map((item) => `<div class="summary-row"><strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} | ${escapeHtml(item.status)}</span></div>`).join("") : "<p>Sem entradas recentes.</p>"}
+      </div>
+    </section>
+    <section class="data-card ranking-card">
+      <h3>Pendências</h3>
+      <div class="data-list">
+        ${payload.pending?.length ? payload.pending.map((item) => `<div class="summary-row"><strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} | ${new Date(item.dueDate).toLocaleDateString("pt-BR")}</span></div>`).join("") : "<p>Sem pendências.</p>"}
+      </div>
+    </section>
+    <section class="data-card champion-history">
+      <h3>Saídas e contas futuras</h3>
+      <div class="data-list">
+        ${payload.expenses?.length ? payload.expenses.map((item) => `<div class="summary-row"><strong>${escapeHtml(item.description)}</strong><span>${money(item.amount)} | ${item.status === "future" ? "Futura" : "Paga"}</span></div>`).join("") : "<p>Sem saídas registradas.</p>"}
+      </div>
+    </section>
+  `;
+}
+
+async function publishFinanceSharePage() {
+  const payload = buildFinancePayload();
+  if (!isCloudMode || !supabaseClient || !currentUser) {
+    await copyFinanceReport();
+    return;
+  }
+  const slug = `${profile.username}-financeiro`.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+  const { error } = await supabaseClient
+    .from("public_share_pages")
+    .upsert({
+      profile_id: currentUser.id,
+      season_id: profile.currentSeasonId || null,
+      slug,
+      payload,
+      is_active: true
+    }, { onConflict: "slug" });
+  const status = document.querySelector("#financeStatus");
+  if (error) {
+    console.warn("Falha ao publicar financeiro", error);
+    await copyFinanceReport();
+    return;
+  }
+  const link = publicShareUrl(slug);
+  await navigator.clipboard?.writeText(link).catch(() => {});
+  if (status) status.textContent = "Link de prestação de contas gerado e copiado.";
 }
 
 function buildSharePayload() {
@@ -2679,7 +3201,7 @@ async function loadPublicShare(slug) {
   publicSharePayload = payload;
   els.publicProfile.textContent = `@${payload.profile?.username || "pelada"}`;
   els.publicTitle.textContent = payload.profile?.peladaName || "Resumo da pelada";
-  els.publicGrid.innerHTML = renderPublicPayload(payload);
+  els.publicGrid.innerHTML = payload.type === "finance" ? renderPublicFinancePayload(payload) : renderPublicPayload(payload);
 }
 
 function renderCharts(sessions) {
@@ -3681,6 +4203,61 @@ els.exportCsv.addEventListener("click", exportCsv);
 els.exportBackup.addEventListener("click", exportBackup);
 els.importBackup.addEventListener("change", importBackup);
 els.publishShare.addEventListener("click", publishSharePage);
+els.publishFinanceShare.addEventListener("click", publishFinanceSharePage);
+els.financeGrid.addEventListener("submit", (event) => {
+  if (event.target.matches("#financeSettingsForm")) saveFinanceSettings(event);
+  if (event.target.matches("#financeExpenseForm")) addFinanceExpense(event);
+});
+els.financeGrid.addEventListener("click", (event) => {
+  const monthly = event.target.closest("[data-create-monthly-charges]");
+  if (monthly) {
+    createMonthlyCharges();
+    return;
+  }
+  const summary = event.target.closest("[data-open-whatsapp-summary]");
+  if (summary) {
+    openDailySummaryWhatsapp();
+    return;
+  }
+  const report = event.target.closest("[data-copy-finance-report]");
+  if (report) {
+    copyFinanceReport();
+    return;
+  }
+  const editPlayerButton = event.target.closest("[data-edit-player]");
+  if (editPlayerButton) {
+    showAppTab("players");
+    editPlayerProfile(editPlayerButton.dataset.editPlayer);
+    return;
+  }
+  const paid = event.target.closest("[data-mark-paid]");
+  if (paid) {
+    updatePaymentStatus(paid.dataset.markPaid, "paid");
+    return;
+  }
+  const free = event.target.closest("[data-mark-free]");
+  if (free) {
+    updatePaymentStatus(free.dataset.markFree, "free");
+    return;
+  }
+  const charge = event.target.closest("[data-charge-whatsapp]");
+  if (charge) {
+    openPaymentWhatsapp(charge.dataset.chargeWhatsapp);
+    return;
+  }
+  const deletePaymentButton = event.target.closest("[data-delete-payment]");
+  if (deletePaymentButton) {
+    deletePayment(deletePaymentButton.dataset.deletePayment);
+    return;
+  }
+  const payExpense = event.target.closest("[data-pay-expense]");
+  if (payExpense) {
+    updateExpenseStatus(payExpense.dataset.payExpense, "paid");
+    return;
+  }
+  const deleteExpenseButton = event.target.closest("[data-delete-expense]");
+  if (deleteExpenseButton) deleteExpense(deleteExpenseButton.dataset.deleteExpense);
+});
 els.shareGrid.addEventListener("click", (event) => {
   const rescueButton = event.target.closest("[data-rescue-summary]");
   if (rescueButton) {

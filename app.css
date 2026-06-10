@@ -661,10 +661,67 @@ p {
 }
 
 .match-tools,
-.data-grid {
+.data-grid,
+.finance-grid {
   display: grid;
   grid-template-columns: 1.05fr .95fr;
   gap: 14px;
+}
+
+.finance-summary-card,
+.finance-wide {
+  grid-column: 1 / -1;
+}
+
+.finance-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.finance-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.finance-list {
+  display: grid;
+  gap: 10px;
+}
+
+.finance-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0b0f0b;
+}
+
+.finance-row.paid {
+  border-color: rgba(155, 227, 29, .35);
+}
+
+.finance-row.free {
+  border-color: rgba(154, 163, 147, .35);
+  opacity: .86;
+}
+
+.finance-row.future,
+.finance-row.pending {
+  border-color: rgba(255, 212, 59, .28);
+}
+
+.finance-row span,
+.finance-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-weight: 800;
 }
 
 .lineup-check {
@@ -1374,6 +1431,7 @@ p {
   .goal-form,
   .rating-row,
   .data-grid,
+  .finance-grid,
   .leader-grid,
   .charts-grid,
   .top5-grid,
@@ -1407,11 +1465,16 @@ p {
   .data-tabs,
   .inline-form,
   .settings-form,
+  .finance-form,
   .complete-form,
   .loan-options,
   .share-link-box,
   .ranking-row {
     width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .finance-row {
     grid-template-columns: 1fr;
   }
 

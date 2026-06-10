@@ -91,6 +91,7 @@
         <nav class="main-nav">
           <button class="tab-button active" data-app-tab="game">Jogo</button>
           <button class="tab-button" data-app-tab="players">Jogadores</button>
+          <button class="tab-button" data-app-tab="finance">Financeiro</button>
           <button class="tab-button" data-app-tab="data">Dados</button>
           <button class="tab-button" data-app-tab="share">Compartilhar</button>
           <button class="secondary-action" id="logoutButton">Sair</button>
@@ -240,6 +241,7 @@
               <input type="hidden" name="playerId">
               <label>Nome<input name="firstName" required></label>
               <label>Sobrenome<input name="lastName" required></label>
+              <label>WhatsApp<input name="whatsapp" inputmode="tel" placeholder="21999999999"></label>
               <label>Tipo
                 <select name="memberType">
                   <option value="mensalista">Mensalista</option>
@@ -258,6 +260,17 @@
             <div class="registered-players" id="registeredPlayers"></div>
           </section>
         </div>
+      </section>
+
+      <section class="finance-tab hidden" id="financeTab">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Financeiro</p>
+            <h2>Controle de cobranças e caixa</h2>
+          </div>
+          <button class="primary-action" id="publishFinanceShare">Prestar contas</button>
+        </div>
+        <div class="finance-grid" id="financeGrid"></div>
       </section>
 
       <section class="data-tab hidden" id="dataTab">
