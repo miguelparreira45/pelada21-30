@@ -2397,6 +2397,7 @@ function renderFinance() {
         <label>Chave de pagamento<input name="pixKey" value="${escapeHtml(finance.settings.pixKey || "")}" placeholder="Pix, telefone ou email"></label>
         <label>Caixa inicial<input name="cashInitial" type="text" inputmode="decimal" value="${formatMoneyInput(finance.settings.cashInitial)}"></label>
         <button class="primary-action" type="submit">Salvar financeiro</button>
+        <span class="save-confirmation" id="financeSaveStatus" aria-live="polite"></span>
       </form>
     </section>
 
@@ -2404,8 +2405,8 @@ function renderFinance() {
       <h3>Ações rápidas</h3>
       <div class="finance-actions">
         <button class="secondary-action" data-create-monthly-charges type="button">Criar cobranças dos mensalistas</button>
-        <button class="secondary-action" data-copy-finance-report type="button">Copiar prestação de contas</button>
       </div>
+      <p class="muted-help">Use esta ação para gerar a cobrança do período atual para todos os mensalistas cadastrados.</p>
       <p class="share-status" id="financeStatus"></p>
     </section>
 
@@ -2432,9 +2433,7 @@ function renderFinance() {
 
     <section class="data-card finance-wide">
       <h3>Pagamentos</h3>
-      <div class="finance-list">
-        ${finance.payments.length ? finance.payments.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(renderPaymentRow).join("") : "<p>Nenhuma cobrança criada ainda.</p>"}
-      </div>
+      ${renderPaymentColumns(finance.payments)}
     </section>
 
     <section class="data-card finance-wide">
@@ -2474,25 +2473,62 @@ function financeSummary() {
   return { received, pending, expenses, balance };
 }
 
-function renderPaymentRow(item) {
-  const player = profile.players.find((entry) => entry.id === item.playerId);
-  const free = item.status === "free";
+function renderPaymentColumns(payments) {
+  const sorted = payments.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  const monthly = sorted.filter((item) => item.kind === "mensalista");
+  const substitutes = sorted.filter((item) => item.kind === "suplente" && item.status === "pending");
   return `
-    <article class="finance-row ${item.status}">
+    <div class="payment-columns">
+      <section class="payment-column">
+        <div class="payment-column-head">
+          <strong>Mensalistas</strong>
+          <span>${monthly.length} cobrança(s)</span>
+        </div>
+        <div class="finance-list">
+          ${monthly.length ? monthly.map((item) => renderPaymentRow(item, "mensalista")).join("") : "<p>Nenhuma cobrança de mensalista criada.</p>"}
+        </div>
+      </section>
+      <section class="payment-column">
+        <div class="payment-column-head">
+          <strong>Suplentes</strong>
+          <span>${substitutes.length} pendente(s)</span>
+        </div>
+        <div class="finance-list">
+          ${substitutes.length ? substitutes.map((item) => renderPaymentRow(item, "suplente")).join("") : "<p>Nenhum suplente pendente.</p>"}
+        </div>
+      </section>
+    </div>
+  `;
+}
+
+function renderPaymentRow(item, column = item.kind) {
+  const player = profile.players.find((entry) => entry.id === item.playerId);
+  const overdue = isPaymentOverdue(item);
+  return `
+    <article class="finance-row ${item.status} ${overdue ? "overdue" : ""}">
       <div>
         <strong>${escapeHtml(item.playerName || playerDisplayName(item.playerId))}</strong>
         <span>${item.kind === "mensalista" ? "Mensalista" : "Suplente"} | ${money(item.amount)} | ${new Date(item.dueDate || item.createdAt).toLocaleDateString("pt-BR")}</span>
+        ${overdue ? "<small>Pagamento atrasado</small>" : ""}
         ${item.note ? `<small>${escapeHtml(item.note)}</small>` : ""}
         ${item.kind === "suplente" && item.status === "pending" ? `<small>${pendingSubstituteCount(item.playerId)} pelada(s) pendente(s)</small>` : ""}
       </div>
       <div class="card-actions">
         ${item.status === "pending" ? `<button class="primary-action" data-mark-paid="${item.id}" type="button">Pago</button>` : ""}
-        ${item.status === "pending" ? `<button class="secondary-action" data-mark-free="${item.id}" type="button">Jogou grátis</button>` : ""}
+        ${column === "suplente" && item.status === "pending" ? `<button class="secondary-action" data-mark-free="${item.id}" type="button">Jogou grátis</button>` : ""}
         ${player?.whatsapp ? `<button class="secondary-action" data-charge-whatsapp="${item.id}" type="button">WhatsApp</button>` : ""}
-        <button class="danger-action" data-delete-payment="${item.id}" type="button">Apagar</button>
       </div>
     </article>
   `;
+}
+
+function isPaymentOverdue(item) {
+  if (item.status !== "pending" || !item.dueDate) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(item.dueDate);
+  due.setHours(0, 0, 0, 0);
+  return due < today;
 }
 
 function renderExpenseRow(item) {
@@ -2551,6 +2587,11 @@ function saveFinanceSettings(event) {
   profile.finance.settings = readFinanceSettingsFromForm(event.currentTarget);
   saveStore();
   renderFinance();
+  const status = document.querySelector("#financeSaveStatus");
+  if (status) {
+    status.textContent = "✓ Salvo";
+    status.classList.add("visible");
+  }
 }
 
 function readFinanceSettingsFromForm(form) {
@@ -2639,7 +2680,7 @@ function nextChargeDate(day) {
 
 function generateSubstituteChargesForSession(session) {
   ensureProfileDefaults(profile);
-  const amount = Number(profile.finance.settings.substituteAmount) || 0;
+  const amount = parseMoneyInput(profile.finance.settings.substituteAmount);
   if (!amount) return;
   const dueDate = new Date(session.date).toISOString().slice(0, 10);
   const participantIds = new Set((session.stats || []).map((item) => item.playerId || item.id));
@@ -2665,13 +2706,6 @@ function updatePaymentStatus(id, status) {
     payment.note = reason;
     payment.freeAt = new Date().toISOString();
   }
-  saveStore();
-  renderFinance();
-}
-
-function deletePayment(id) {
-  if (!confirm("Apagar esta cobrança?")) return;
-  profile.finance.payments = profile.finance.payments.filter((item) => item.id !== id);
   saveStore();
   renderFinance();
 }
@@ -4240,11 +4274,6 @@ els.financeGrid.addEventListener("click", (event) => {
     openDailySummaryWhatsapp();
     return;
   }
-  const report = event.target.closest("[data-copy-finance-report]");
-  if (report) {
-    copyFinanceReport();
-    return;
-  }
   const editPlayerButton = event.target.closest("[data-edit-player]");
   if (editPlayerButton) {
     showAppTab("players");
@@ -4264,11 +4293,6 @@ els.financeGrid.addEventListener("click", (event) => {
   const charge = event.target.closest("[data-charge-whatsapp]");
   if (charge) {
     openPaymentWhatsapp(charge.dataset.chargeWhatsapp);
-    return;
-  }
-  const deletePaymentButton = event.target.closest("[data-delete-payment]");
-  if (deletePaymentButton) {
-    deletePayment(deletePaymentButton.dataset.deletePayment);
     return;
   }
   const payExpense = event.target.closest("[data-pay-expense]");
