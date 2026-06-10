@@ -2386,8 +2386,8 @@ function renderFinance() {
     <section class="data-card">
       <h3>Configurações de cobrança</h3>
       <form class="finance-form" id="financeSettingsForm">
-        <label>Valor mensalista<input name="monthlyAmount" type="number" min="0" step="0.01" value="${finance.settings.monthlyAmount || 0}"></label>
-        <label>Valor suplente<input name="substituteAmount" type="number" min="0" step="0.01" value="${finance.settings.substituteAmount || 0}"></label>
+        <label>Valor mensalista<input name="monthlyAmount" type="text" inputmode="decimal" value="${formatMoneyInput(finance.settings.monthlyAmount)}"></label>
+        <label>Valor suplente<input name="substituteAmount" type="text" inputmode="decimal" value="${formatMoneyInput(finance.settings.substituteAmount)}"></label>
         <label>Prazo mensalista
           <select name="monthlyFrequency">
             ${["semanal", "quinzenal", "mensal"].map((item) => `<option value="${item}" ${finance.settings.monthlyFrequency === item ? "selected" : ""}>${capitalize(item)}</option>`).join("")}
@@ -2395,7 +2395,7 @@ function renderFinance() {
         </label>
         <label>Dia de cobrança<input name="monthlyChargeDay" type="number" min="1" max="31" value="${finance.settings.monthlyChargeDay || 10}"></label>
         <label>Chave de pagamento<input name="pixKey" value="${escapeHtml(finance.settings.pixKey || "")}" placeholder="Pix, telefone ou email"></label>
-        <label>Caixa inicial<input name="cashInitial" type="number" min="0" step="0.01" value="${finance.settings.cashInitial || 0}"></label>
+        <label>Caixa inicial<input name="cashInitial" type="text" inputmode="decimal" value="${formatMoneyInput(finance.settings.cashInitial)}"></label>
         <button class="primary-action" type="submit">Salvar financeiro</button>
       </form>
     </section>
@@ -2418,7 +2418,7 @@ function renderFinance() {
       <h3>Nova saída do caixa</h3>
       <form class="finance-form" id="financeExpenseForm">
         <label>Descrição<input name="description" placeholder="Quadra, goleiro, churrasco..." required></label>
-        <label>Valor<input name="amount" type="number" min="0" step="0.01" required></label>
+        <label>Valor<input name="amount" type="text" inputmode="decimal" required></label>
         <label>Vencimento<input name="dueDate" type="date"></label>
         <label>Status
           <select name="status">
@@ -2447,7 +2447,18 @@ function renderFinance() {
 }
 
 function money(value) {
-  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  return parseMoneyInput(value).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function formatMoneyInput(value) {
+  return Number(value || 0).toFixed(2).replace(".", ",");
+}
+
+function parseMoneyInput(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return 0;
+  if (raw.includes(",")) return Number(raw.replace(/\./g, "").replace(",", ".")) || 0;
+  return Number(raw) || 0;
 }
 
 function capitalize(value) {
@@ -2456,10 +2467,10 @@ function capitalize(value) {
 
 function financeSummary() {
   const finance = profile.finance || structuredClone(DEFAULT_FINANCE);
-  const received = finance.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const pending = finance.payments.filter((item) => item.status === "pending").reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const expenses = finance.expenses.filter((item) => item.status === "paid").reduce((sum, item) => sum + Number(item.amount || 0), 0);
-  const balance = Number(finance.settings.cashInitial || 0) + received - expenses;
+  const received = finance.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
+  const pending = finance.payments.filter((item) => item.status === "pending").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
+  const expenses = finance.expenses.filter((item) => item.status === "paid").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
+  const balance = parseMoneyInput(finance.settings.cashInitial) + received - expenses;
   return { received, pending, expenses, balance };
 }
 
@@ -2537,17 +2548,26 @@ function pendingSubstituteCount(playerId) {
 
 function saveFinanceSettings(event) {
   event.preventDefault();
-  const data = new FormData(event.currentTarget);
-  profile.finance.settings = {
-    monthlyAmount: Number(data.get("monthlyAmount")) || 0,
-    substituteAmount: Number(data.get("substituteAmount")) || 0,
+  profile.finance.settings = readFinanceSettingsFromForm(event.currentTarget);
+  saveStore();
+  renderFinance();
+}
+
+function readFinanceSettingsFromForm(form) {
+  const data = new FormData(form);
+  return {
+    monthlyAmount: parseMoneyInput(data.get("monthlyAmount")),
+    substituteAmount: parseMoneyInput(data.get("substituteAmount")),
     monthlyFrequency: data.get("monthlyFrequency") || "mensal",
     monthlyChargeDay: Math.max(1, Math.min(31, Number(data.get("monthlyChargeDay")) || 10)),
     pixKey: String(data.get("pixKey") || "").trim(),
-    cashInitial: Number(data.get("cashInitial")) || 0
+    cashInitial: parseMoneyInput(data.get("cashInitial"))
   };
-  saveStore();
-  renderFinance();
+}
+
+function syncFinanceSettingsFromForm() {
+  const form = document.querySelector("#financeSettingsForm");
+  if (form) profile.finance.settings = readFinanceSettingsFromForm(form);
 }
 
 function addFinanceExpense(event) {
@@ -2556,7 +2576,7 @@ function addFinanceExpense(event) {
   profile.finance.expenses.push({
     id: crypto.randomUUID(),
     description: String(data.get("description") || "").trim(),
-    amount: Number(data.get("amount")) || 0,
+    amount: parseMoneyInput(data.get("amount")),
     dueDate: data.get("dueDate") || new Date().toISOString().slice(0, 10),
     status: data.get("status") || "paid",
     createdAt: new Date().toISOString()
@@ -2589,8 +2609,9 @@ function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note =
 }
 
 function createMonthlyCharges() {
+  syncFinanceSettingsFromForm();
   const settings = profile.finance.settings;
-  const amount = Number(settings.monthlyAmount) || 0;
+  const amount = parseMoneyInput(settings.monthlyAmount);
   if (!amount) {
     alert("Defina o valor do mensalista primeiro.");
     return;
