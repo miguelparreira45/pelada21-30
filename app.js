@@ -1695,6 +1695,7 @@ function renderFinalSummary() {
       <button class="primary-action big" id="freshSession">Nova pelada</button>
       <button class="primary-action" id="exportPodiumImage">Imagem WhatsApp</button>
       <button class="primary-action" id="exportStravaImage">Resumo transparente</button>
+      <button class="primary-action" id="chargeFinalSubstitutes">Cobrar suplentes</button>
       <button class="secondary-action" id="copyFinalReport">Copiar resumo</button>
       <button class="secondary-action" id="openDataFromFinal">Ver dados</button>
     </div>
@@ -1702,6 +1703,7 @@ function renderFinalSummary() {
   document.querySelector("#freshSession").addEventListener("click", resetDraft);
   document.querySelector("#exportPodiumImage").addEventListener("click", exportPodiumImage);
   document.querySelector("#exportStravaImage").addEventListener("click", exportStravaImage);
+  document.querySelector("#chargeFinalSubstitutes").addEventListener("click", () => openChargeWhatsAppBatch("suplente", summary.id));
   document.querySelector("#copyFinalReport").addEventListener("click", () => {
     navigator.clipboard?.writeText(summary.report || "").then(() => alert("Resumo copiado."));
   });
@@ -2371,6 +2373,7 @@ function renderShare() {
 
 function renderFinance() {
   ensureProfileDefaults(profile);
+  ensureScheduledMonthlyCharges();
   const finance = profile.finance;
   const summary = financeSummary();
   els.financeGrid.innerHTML = `
@@ -2404,9 +2407,11 @@ function renderFinance() {
     <section class="data-card">
       <h3>Ações rápidas</h3>
       <div class="finance-actions">
-        <button class="secondary-action" data-create-monthly-charges type="button">Criar cobranças dos mensalistas</button>
+        <button class="secondary-action" data-create-monthly-charges type="button">Gerar cobranças do período</button>
+        <button class="secondary-action" data-charge-monthly-pending type="button">Cobrar mensalistas pendentes</button>
+        <button class="secondary-action" data-charge-substitute-pending type="button">Cobrar suplentes pendentes</button>
       </div>
-      <p class="muted-help">Use esta ação para gerar a cobrança do período atual para todos os mensalistas cadastrados.</p>
+      <p class="muted-help">As mensagens abrem no WhatsApp com valor, motivo da dívida e chave de pagamento.</p>
       <p class="share-status" id="financeStatus"></p>
     </section>
 
@@ -2649,33 +2654,83 @@ function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note =
   return payment;
 }
 
-function createMonthlyCharges() {
-  syncFinanceSettingsFromForm();
+function createMonthlyCharges(options = {}) {
+  if (!options.automatic) syncFinanceSettingsFromForm();
   const settings = profile.finance.settings;
   const amount = parseMoneyInput(settings.monthlyAmount);
   if (!amount) {
-    alert("Defina o valor do mensalista primeiro.");
-    return;
+    if (!options.automatic) alert("Defina o valor do mensalista primeiro.");
+    return 0;
   }
-  const dueDate = nextChargeDate(settings.monthlyChargeDay);
+  const cycle = billingCycle(settings, options.automatic);
+  if (!cycle) return 0;
+  let created = 0;
   profile.players
     .filter((player) => player.memberType === "mensalista")
-    .forEach((player) => createPayment({
-      playerId: player.id,
-      kind: "mensalista",
-      amount,
-      dueDate,
-      note: `Cobrança ${settings.monthlyFrequency}`
-    }));
-  saveStore();
-  renderFinance();
+    .forEach((player) => {
+      const before = profile.finance.payments.length;
+      createPayment({
+        playerId: player.id,
+        kind: "mensalista",
+        amount,
+        dueDate: cycle.dueDate,
+        sessionId: `mensalista:${cycle.key}`,
+        note: `Mensalidade ${cycle.label}`
+      });
+      if (profile.finance.payments.length > before) created += 1;
+    });
+  if (created) saveStore();
+  if (!options.automatic) {
+    renderFinance();
+    setFinanceStatus(created ? `${created} cobrança(s) de mensalista criadas para ${cycle.label}.` : "As cobranças deste período já estavam criadas.");
+  }
+  return created;
 }
 
-function nextChargeDate(day) {
+function ensureScheduledMonthlyCharges() {
+  if (!profile?.finance?.settings) return;
+  createMonthlyCharges({ automatic: true });
+}
+
+function billingCycle(settings, automatic = false) {
   const now = new Date();
-  const date = new Date(now.getFullYear(), now.getMonth(), Math.min(Number(day) || 10, 28));
-  if (date < new Date(now.toDateString())) date.setMonth(date.getMonth() + 1);
-  return date.toISOString().slice(0, 10);
+  const frequency = settings.monthlyFrequency || "mensal";
+  const day = Math.max(1, Math.min(31, Number(settings.monthlyChargeDay) || 10));
+  const year = now.getFullYear();
+  const month = now.getMonth();
+  const monthLabel = now.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  if (frequency === "semanal") {
+    const weekStart = new Date(now);
+    weekStart.setDate(now.getDate() - now.getDay());
+    const key = `${year}-semana-${weekNumber(now)}`;
+    return { key, dueDate: now.toISOString().slice(0, 10), label: `da semana de ${weekStart.toLocaleDateString("pt-BR")}` };
+  }
+  if (frequency === "quinzenal") {
+    const firstHalf = now.getDate() <= 15;
+    const dueDay = firstHalf ? Math.min(day, 15) : Math.min(day + 15, lastDayOfMonth(year, month));
+    const due = new Date(year, month, dueDay);
+    if (automatic && now < startOfDay(due)) return null;
+    const halfLabel = firstHalf ? "1ª quinzena" : "2ª quinzena";
+    return { key: `${year}-${month + 1}-${firstHalf ? "q1" : "q2"}`, dueDate: due.toISOString().slice(0, 10), label: `${halfLabel} de ${monthLabel}` };
+  }
+  const due = new Date(year, month, Math.min(day, lastDayOfMonth(year, month)));
+  if (automatic && now < startOfDay(due)) return null;
+  return { key: `${year}-${month + 1}`, dueDate: due.toISOString().slice(0, 10), label: `de ${monthLabel}` };
+}
+
+function startOfDay(date) {
+  const copy = new Date(date);
+  copy.setHours(0, 0, 0, 0);
+  return copy;
+}
+
+function lastDayOfMonth(year, month) {
+  return new Date(year, month + 1, 0).getDate();
+}
+
+function weekNumber(date) {
+  const first = new Date(date.getFullYear(), 0, 1);
+  return Math.ceil((((date - first) / 86400000) + first.getDay() + 1) / 7);
 }
 
 function generateSubstituteChargesForSession(session) {
@@ -2734,14 +2789,85 @@ function whatsappUrl(phone, text) {
 }
 
 function paymentMessage(payment) {
-  const settings = profile.finance.settings;
+  return chargeMessage({
+    playerName: payment.playerName,
+    total: parseMoneyInput(payment.amount),
+    reasons: [chargeReason(payment)]
+  });
+}
+
+function chargeReason(payment) {
+  if (payment.kind === "suplente") return payment.note || "Participação como suplente";
+  return payment.note || "Mensalidade em aberto";
+}
+
+function pendingChargeTargets(kind, sessionId = "") {
+  const groups = new Map();
+  (profile.finance?.payments || [])
+    .filter((payment) => payment.status === "pending" && payment.kind === kind)
+    .filter((payment) => !sessionId || payment.sessionId === sessionId)
+    .forEach((payment) => {
+      const player = profile.players.find((item) => item.id === payment.playerId);
+      const key = payment.playerId;
+      if (!groups.has(key)) {
+        groups.set(key, {
+          player,
+          playerName: payment.playerName || playerDisplayName(payment.playerId),
+          whatsapp: player?.whatsapp || "",
+          total: 0,
+          payments: [],
+          reasons: []
+        });
+      }
+      const target = groups.get(key);
+      target.total += parseMoneyInput(payment.amount);
+      target.payments.push(payment);
+      target.reasons.push(chargeReason(payment));
+    });
+  return Array.from(groups.values());
+}
+
+function chargeMessage(target) {
+  const settings = profile.finance.settings || {};
+  const firstName = String(target.playerName || "").split(" ")[0] || "craque";
   return [
-    `Fala, ${payment.playerName}!`,
-    `Cobrança da ${profile.peladaName}: ${money(payment.amount)}.`,
-    payment.note ? payment.note : "",
+    `Fala, ${firstName}! Aqui é da ${profile.peladaName}.`,
+    `Você tem ${money(target.total)} em aberto no PeladaFast.`,
+    "",
+    "Motivo:",
+    ...target.reasons.map((reason) => `- ${reason}`),
+    settings.pixKey ? "" : "",
     settings.pixKey ? `Chave de pagamento: ${settings.pixKey}` : "",
-    "Quando pagar, avisa o admin da pelada. Valeu!"
-  ].filter(Boolean).join("\n");
+    "Depois que pagar, avisa o admin da pelada para dar baixa. Valeu!"
+  ].filter((line) => line !== null && line !== undefined).join("\n");
+}
+
+function setFinanceStatus(text, isError = false) {
+  const status = document.querySelector("#financeStatus");
+  if (!status) return;
+  status.textContent = text;
+  status.classList.toggle("error", isError);
+}
+
+function openChargeWhatsAppBatch(kind, sessionId = "") {
+  const targets = pendingChargeTargets(kind, sessionId);
+  if (!targets.length) {
+    alert(kind === "suplente" ? "Nenhum suplente pendente para cobrar." : "Nenhum mensalista pendente para cobrar.");
+    return;
+  }
+  const withWhatsapp = targets.filter((target) => onlyDigits(target.whatsapp));
+  const withoutWhatsapp = targets.length - withWhatsapp.length;
+  if (!withWhatsapp.length) {
+    alert("Nenhum jogador pendente tem WhatsApp cadastrado.");
+    return;
+  }
+  withWhatsapp.forEach((target) => {
+    const url = whatsappUrl(target.whatsapp, chargeMessage(target));
+    window.open(url, "_blank", "noopener");
+  });
+  const message = `${withWhatsapp.length} cobrança(s) preparada(s) no WhatsApp.${withoutWhatsapp ? ` ${withoutWhatsapp} jogador(es) sem WhatsApp cadastrado.` : ""}`;
+  setFinanceStatus(message, false);
+  if (!document.querySelector("#financeStatus")) alert(message);
 }
 
 function openPaymentWhatsapp(id) {
@@ -4267,6 +4393,16 @@ els.financeGrid.addEventListener("click", (event) => {
   const monthly = event.target.closest("[data-create-monthly-charges]");
   if (monthly) {
     createMonthlyCharges();
+    return;
+  }
+  const monthlyPending = event.target.closest("[data-charge-monthly-pending]");
+  if (monthlyPending) {
+    openChargeWhatsAppBatch("mensalista");
+    return;
+  }
+  const substitutePending = event.target.closest("[data-charge-substitute-pending]");
+  if (substitutePending) {
+    openChargeWhatsAppBatch("suplente");
     return;
   }
   const summary = event.target.closest("[data-open-whatsapp-summary]");
