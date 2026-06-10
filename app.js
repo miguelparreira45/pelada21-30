@@ -44,6 +44,7 @@ const DEFAULT_FINANCE = {
   },
   payments: [],
   expenses: [],
+  deletedPaymentKeys: [],
   publicShares: {}
 };
 
@@ -518,6 +519,7 @@ function ensureProfileDefaults(item) {
   item.finance.settings = { ...DEFAULT_FINANCE.settings, ...(item.finance.settings || {}) };
   item.finance.payments ||= [];
   item.finance.expenses ||= [];
+  item.finance.deletedPaymentKeys ||= [];
   item.finance.publicShares ||= {};
   removeEmptySuggestedSeason(item);
   if (!item.currentSeasonId || !item.seasons.some((season) => season.id === item.currentSeasonId && !season.finishedAt)) {
@@ -2758,7 +2760,8 @@ function addManualCharge(event) {
     amount,
     dueDate,
     sessionId: `manual:${crypto.randomUUID()}`,
-    note: String(data.get("note") || "Cobrança manual").trim() || "Cobrança manual"
+    note: String(data.get("note") || "Cobrança manual").trim() || "Cobrança manual",
+    force: true
   });
   if (!payment) {
     setFinanceStatus("Não consegui criar esta cobrança. Confira jogador e valor.", true);
@@ -2767,6 +2770,7 @@ function addManualCharge(event) {
   payment.status = status;
   payment.paidAt = status === "paid" ? new Date().toISOString() : "";
   payment.freeAt = status === "free" ? new Date().toISOString() : "";
+  financePaymentFilters = { search: "", month: "", day: "" };
   saveStore();
   renderFinance();
   setFinanceStatus("Cobrança manual adicionada.");
@@ -2787,6 +2791,7 @@ function addFinanceExpense(event) {
     amount,
     dueDate: data.get("dueDate") || new Date().toISOString().slice(0, 10),
     status: data.get("status") || "paid",
+    paidAt: (data.get("status") || "paid") === "paid" ? new Date().toISOString() : "",
     createdAt: new Date().toISOString()
   });
   saveStore();
@@ -2794,9 +2799,15 @@ function addFinanceExpense(event) {
   setFinanceStatus("Saída adicionada ao caixa.");
 }
 
-function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note = "" }) {
+function paymentUniqueKey({ playerId, kind, dueDate, sessionId = "" }) {
+  return `${playerId}|${kind}|${sessionId || ""}|${dueDate || ""}`;
+}
+
+function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note = "", force = false }) {
   const player = profile.players.find((item) => item.id === playerId);
   if (!player || !amount) return null;
+  const uniqueKey = paymentUniqueKey({ playerId, kind, dueDate, sessionId });
+  if (!force && (profile.finance.deletedPaymentKeys || []).includes(uniqueKey)) return null;
   const existing = profile.finance.payments.find((item) =>
     item.playerId === playerId && item.kind === kind && item.sessionId === sessionId && item.dueDate === dueDate
   );
@@ -2809,6 +2820,7 @@ function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note =
     amount,
     dueDate,
     sessionId,
+    uniqueKey,
     note,
     status: "pending",
     createdAt: new Date().toISOString()
@@ -2933,7 +2945,7 @@ function editPayment(id) {
   if (!payment) return;
   const amount = prompt("Valor da cobrança", formatMoneyInput(payment.amount));
   if (amount === null) return;
-  const dueDate = prompt("Data de vencimento (aaaa-mm-dd)", String(payment.dueDate || "").slice(0, 10));
+  const dueDate = prompt("Vencimento da cobrança (aaaa-mm-dd)", String(payment.dueDate || "").slice(0, 10));
   if (dueDate === null) return;
   const status = prompt("Status: pendente, pago ou grátis", paymentStatusLabel(payment.status || "pending"));
   if (status === null) return;
@@ -2946,12 +2958,19 @@ function editPayment(id) {
   payment.note = note.trim();
   payment.paidAt = normalizedStatus === "paid" ? (payment.paidAt || new Date().toISOString()) : "";
   payment.freeAt = normalizedStatus === "free" ? (payment.freeAt || new Date().toISOString()) : "";
+  payment.uniqueKey = paymentUniqueKey(payment);
   saveStore();
   renderFinance();
 }
 
 function deletePayment(id) {
   if (!confirm("Apagar esta cobrança? Use apenas quando a cobrança foi criada por erro.")) return;
+  const payment = profile.finance.payments.find((item) => item.id === id);
+  if (payment) {
+    const key = payment.uniqueKey || paymentUniqueKey(payment);
+    profile.finance.deletedPaymentKeys ||= [];
+    if (key && !profile.finance.deletedPaymentKeys.includes(key)) profile.finance.deletedPaymentKeys.push(key);
+  }
   profile.finance.payments = profile.finance.payments.filter((item) => item.id !== id);
   saveStore();
   renderFinance();
