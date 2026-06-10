@@ -2422,6 +2422,35 @@ function renderFinance() {
     </section>
 
     <section class="data-card">
+      <h3>Nova cobrança manual</h3>
+      <form class="finance-form" id="manualChargeForm">
+        <label>Jogador
+          <select name="playerId" required>
+            <option value="">Escolha o jogador</option>
+            ${profile.players.slice().sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`)).map((player) => `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${player.memberType === "mensalista" ? "mensalista" : "suplente"})</option>`).join("")}
+          </select>
+        </label>
+        <label>Tipo
+          <select name="kind">
+            <option value="mensalista">Mensalista</option>
+            <option value="suplente">Suplente</option>
+          </select>
+        </label>
+        <label>Valor<input name="amount" type="text" inputmode="decimal" required></label>
+        <label>Vencimento<input name="dueDate" type="date"></label>
+        <label>Status
+          <select name="status">
+            <option value="pending">Pendente</option>
+            <option value="paid">Pago</option>
+            <option value="free">Grátis/isento</option>
+          </select>
+        </label>
+        <label>Motivo<input name="note" placeholder="Ex: mensalidade proporcional"></label>
+        <button class="primary-action" type="submit">Adicionar cobrança</button>
+      </form>
+    </section>
+
+    <section class="data-card">
       <h3>Nova saída do caixa</h3>
       <form class="finance-form" id="financeExpenseForm">
         <label>Descrição<input name="description" placeholder="Quadra, goleiro, churrasco..." required></label>
@@ -2444,10 +2473,8 @@ function renderFinance() {
     </section>
 
     <section class="data-card finance-wide">
-      <h3>Caixa e contas</h3>
-      <div class="finance-list">
-        ${finance.expenses.length ? finance.expenses.slice().sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).map(renderExpenseRow).join("") : "<p>Nenhuma saída registrada.</p>"}
-      </div>
+      <h3>Extrato / histórico de entradas e saídas</h3>
+      ${renderFinanceLedger()}
     </section>
   `;
 }
@@ -2596,6 +2623,59 @@ function renderExpenseRow(item) {
   `;
 }
 
+function renderFinanceLedger() {
+  const payments = (profile.finance?.payments || []).map((item) => ({
+    type: "payment",
+    date: item.paidAt || item.dueDate || item.createdAt,
+    item
+  }));
+  const expenses = (profile.finance?.expenses || []).map((item) => ({
+    type: "expense",
+    date: item.paidAt || item.dueDate || item.createdAt,
+    item
+  }));
+  const rows = [...payments, ...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+  if (!rows.length) return "<p>Nenhuma entrada ou saída registrada.</p>";
+  return `
+    <div class="finance-list">
+      ${rows.map((row) => row.type === "payment" ? renderLedgerPayment(row.item) : renderLedgerExpense(row.item)).join("")}
+    </div>
+  `;
+}
+
+function renderLedgerPayment(item) {
+  const sign = item.status === "paid" ? "+" : "";
+  return `
+    <article class="finance-row ledger-row ${item.status}">
+      <div>
+        <strong>${sign}${money(item.amount)} · ${escapeHtml(item.playerName || playerDisplayName(item.playerId))}</strong>
+        <span>Entrada | ${item.kind === "mensalista" ? "Mensalista" : "Suplente"} | ${paymentStatusLabel(item.status)} | ${new Date(item.paidAt || item.dueDate || item.createdAt).toLocaleDateString("pt-BR")}</span>
+        ${item.note ? `<small>${escapeHtml(item.note)}</small>` : ""}
+      </div>
+      <div class="card-actions">
+        <button class="secondary-action" data-edit-payment="${item.id}" type="button">Editar</button>
+        <button class="danger-action" data-delete-payment="${item.id}" type="button">Apagar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLedgerExpense(item) {
+  return `
+    <article class="finance-row ledger-row ${item.status}">
+      <div>
+        <strong>-${money(item.amount)} · ${escapeHtml(item.description)}</strong>
+        <span>Saída | ${item.status === "future" ? "Conta futura" : "Pago"} | ${new Date(item.paidAt || item.dueDate || item.createdAt).toLocaleDateString("pt-BR")}</span>
+      </div>
+      <div class="card-actions">
+        ${item.status === "future" ? `<button class="primary-action" data-pay-expense="${item.id}" type="button">Marcar pago</button>` : ""}
+        <button class="secondary-action" data-edit-expense="${item.id}" type="button">Editar</button>
+        <button class="danger-action" data-delete-expense="${item.id}" type="button">Apagar</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderLatestSessionWhatsAppButtons() {
   const latest = (profile.sessions || []).slice().sort((a, b) => new Date(b.date) - new Date(a.date))[0];
   if (!latest) return "<p>Finalize uma pelada para enviar o resumo aos jogadores.</p>";
@@ -2661,19 +2741,57 @@ function syncFinanceSettingsFromForm() {
   if (form) profile.finance.settings = readFinanceSettingsFromForm(form);
 }
 
+function addManualCharge(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const playerId = data.get("playerId");
+  const amount = parseMoneyInput(data.get("amount"));
+  if (!playerId || !amount) {
+    setFinanceStatus("Escolha o jogador e informe o valor da cobrança.", true);
+    return;
+  }
+  const dueDate = data.get("dueDate") || new Date().toISOString().slice(0, 10);
+  const status = data.get("status") || "pending";
+  const payment = createPayment({
+    playerId,
+    kind: data.get("kind") || "mensalista",
+    amount,
+    dueDate,
+    sessionId: `manual:${crypto.randomUUID()}`,
+    note: String(data.get("note") || "Cobrança manual").trim() || "Cobrança manual"
+  });
+  if (!payment) {
+    setFinanceStatus("Não consegui criar esta cobrança. Confira jogador e valor.", true);
+    return;
+  }
+  payment.status = status;
+  payment.paidAt = status === "paid" ? new Date().toISOString() : "";
+  payment.freeAt = status === "free" ? new Date().toISOString() : "";
+  saveStore();
+  renderFinance();
+  setFinanceStatus("Cobrança manual adicionada.");
+}
+
 function addFinanceExpense(event) {
   event.preventDefault();
   const data = new FormData(event.currentTarget);
+  const description = String(data.get("description") || "").trim();
+  const amount = parseMoneyInput(data.get("amount"));
+  if (!description || !amount) {
+    setFinanceStatus("Informe a descrição e o valor da saída.", true);
+    return;
+  }
   profile.finance.expenses.push({
     id: crypto.randomUUID(),
-    description: String(data.get("description") || "").trim(),
-    amount: parseMoneyInput(data.get("amount")),
+    description,
+    amount,
     dueDate: data.get("dueDate") || new Date().toISOString().slice(0, 10),
     status: data.get("status") || "paid",
     createdAt: new Date().toISOString()
   });
   saveStore();
   renderFinance();
+  setFinanceStatus("Saída adicionada ao caixa.");
 }
 
 function createPayment({ playerId, kind, amount, dueDate, sessionId = "", note = "" }) {
@@ -4497,6 +4615,7 @@ els.publishShare.addEventListener("click", publishSharePage);
 els.publishFinanceShare.addEventListener("click", publishFinanceSharePage);
 els.financeGrid.addEventListener("submit", (event) => {
   if (event.target.matches("#financeSettingsForm")) saveFinanceSettings(event);
+  if (event.target.matches("#manualChargeForm")) addManualCharge(event);
   if (event.target.matches("#financeExpenseForm")) addFinanceExpense(event);
 });
 els.financeGrid.addEventListener("input", (event) => {
@@ -4581,7 +4700,10 @@ els.financeGrid.addEventListener("click", (event) => {
     return;
   }
   const deleteExpenseButton = event.target.closest("[data-delete-expense]");
-  if (deleteExpenseButton) deleteExpense(deleteExpenseButton.dataset.deleteExpense);
+  if (deleteExpenseButton) {
+    deleteExpense(deleteExpenseButton.dataset.deleteExpense);
+    return;
+  }
   const applyFilters = event.target.closest("[data-apply-payment-filters]");
   if (applyFilters) {
     const search = els.financeGrid.querySelector("[data-payment-search]");
