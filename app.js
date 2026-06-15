@@ -43,6 +43,7 @@ const DEFAULT_FINANCE = {
     cashInitial: 0
   },
   payments: [],
+  cashEntries: [],
   expenses: [],
   deletedPaymentKeys: [],
   publicShares: {}
@@ -522,6 +523,7 @@ function ensureProfileDefaults(item) {
   item.finance ||= structuredClone(DEFAULT_FINANCE);
   item.finance.settings = { ...DEFAULT_FINANCE.settings, ...(item.finance.settings || {}) };
   item.finance.payments ||= [];
+  item.finance.cashEntries ||= [];
   item.finance.expenses ||= [];
   item.finance.deletedPaymentKeys ||= [];
   item.finance.publicShares ||= {};
@@ -2457,6 +2459,16 @@ function renderFinance() {
     </section>
 
     <section class="data-card">
+      <h3>Nova entrada do caixa</h3>
+      <form class="finance-form" id="financeEntryForm">
+        <label>Descrição<input name="description" placeholder="Patrocínio, sobra, venda..." required></label>
+        <label>Valor<input name="amount" type="text" inputmode="decimal" required></label>
+        <label>Data<input name="receivedAt" type="date"></label>
+        <button class="primary-action" data-add-finance-entry type="button">Adicionar entrada</button>
+      </form>
+    </section>
+
+    <section class="data-card">
       <h3>Nova saída do caixa</h3>
       <form class="finance-form" id="financeExpenseForm">
         <label>Descrição<input name="description" placeholder="Quadra, goleiro, churrasco..." required></label>
@@ -2471,7 +2483,6 @@ function renderFinance() {
         <button class="primary-action" data-add-finance-expense type="button">Adicionar saída</button>
       </form>
     </section>
-
     <section class="data-card finance-wide">
       <h3>Pagamentos</h3>
       ${renderPaymentFilters()}
@@ -2507,10 +2518,12 @@ function capitalize(value) {
 function financeSummary() {
   const finance = profile.finance || structuredClone(DEFAULT_FINANCE);
   const received = finance.payments.filter((item) => item.status === "paid").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
+  const cashEntries = (finance.cashEntries || []).reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
   const pending = finance.payments.filter((item) => item.status === "pending").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
   const expenses = finance.expenses.filter((item) => item.status === "paid").reduce((sum, item) => sum + parseMoneyInput(item.amount), 0);
-  const balance = parseMoneyInput(finance.settings.cashInitial) + received - expenses;
-  return { received, pending, expenses, balance };
+  const totalReceived = received + cashEntries;
+  const balance = parseMoneyInput(finance.settings.cashInitial) + totalReceived - expenses;
+  return { received: totalReceived, paymentReceived: received, cashEntries, pending, expenses, balance };
 }
 
 function renderPaymentFilters() {
@@ -2635,16 +2648,25 @@ function renderFinanceLedger() {
     date: item.paidAt || item.dueDate || item.createdAt,
     item
   }));
+  const cashEntries = (profile.finance?.cashEntries || []).map((item) => ({
+    type: "cashEntry",
+    date: item.receivedAt || item.createdAt,
+    item
+  }));
   const expenses = (profile.finance?.expenses || []).map((item) => ({
     type: "expense",
     date: item.paidAt || item.dueDate || item.createdAt,
     item
   }));
-  const rows = [...payments, ...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
+  const rows = [...payments, ...cashEntries, ...expenses].sort((a, b) => new Date(b.date) - new Date(a.date));
   if (!rows.length) return "<p>Nenhuma entrada ou saída registrada.</p>";
   return `
     <div class="finance-list">
-      ${rows.map((row) => row.type === "payment" ? renderLedgerPayment(row.item) : renderLedgerExpense(row.item)).join("")}
+      ${rows.map((row) => {
+        if (row.type === "payment") return renderLedgerPayment(row.item);
+        if (row.type === "cashEntry") return renderLedgerCashEntry(row.item);
+        return renderLedgerExpense(row.item);
+      }).join("")}
     </div>
   `;
 }
@@ -2677,6 +2699,21 @@ function renderLedgerExpense(item) {
         ${item.status === "future" ? `<button class="primary-action" data-pay-expense="${item.id}" type="button">Marcar pago</button>` : ""}
         <button class="secondary-action" data-edit-expense="${item.id}" type="button">Editar</button>
         <button class="danger-action" data-delete-expense="${item.id}" type="button">Apagar</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderLedgerCashEntry(item) {
+  return `
+    <article class="finance-row ledger-row paid">
+      <div>
+        <strong>+${money(item.amount)} · ${escapeHtml(item.description)}</strong>
+        <span>Entrada manual | ${new Date(item.receivedAt || item.createdAt).toLocaleDateString("pt-BR")}</span>
+      </div>
+      <div class="card-actions">
+        <button class="secondary-action" data-edit-cash-entry="${item.id}" type="button">Editar</button>
+        <button class="danger-action" data-delete-cash-entry="${item.id}" type="button">Apagar</button>
       </div>
     </article>
   `;
@@ -2801,6 +2838,28 @@ function addFinanceExpense(event) {
   saveStore();
   renderFinance();
   setFinanceStatus("Saída adicionada ao caixa.");
+}
+
+function addFinanceEntry(event) {
+  event.preventDefault();
+  const data = new FormData(event.currentTarget);
+  const description = String(data.get("description") || "").trim();
+  const amount = parseMoneyInput(data.get("amount"));
+  if (!description || !amount) {
+    setFinanceStatus("Informe a descrição e o valor da entrada.", true);
+    return;
+  }
+  profile.finance.cashEntries ||= [];
+  profile.finance.cashEntries.push({
+    id: crypto.randomUUID(),
+    description,
+    amount,
+    receivedAt: data.get("receivedAt") || new Date().toISOString().slice(0, 10),
+    createdAt: new Date().toISOString()
+  });
+  saveStore();
+  renderFinance();
+  setFinanceStatus("Entrada adicionada ao caixa.");
 }
 
 function paymentUniqueKey({ playerId, kind, dueDate, sessionId = "" }) {
@@ -2985,10 +3044,23 @@ function deleteExpense(id) {
   renderFinance();
 }
 
+function editCashEntry(id) {
+  const entry = (profile.finance.cashEntries || []).find((item) => item.id === id);
+  if (!entry) return;
+  openFinanceEditPopup("cashEntry", entry);
+}
+
+function deleteCashEntry(id) {
+  if (!confirm("Apagar esta entrada do caixa?")) return;
+  profile.finance.cashEntries = (profile.finance.cashEntries || []).filter((item) => item.id !== id);
+  saveStore();
+  renderFinance();
+}
+
 function openFinanceEditPopup(type, item) {
   if (!els.financeEditPopup || !els.financeEditSlot) return;
-  els.financeEditTitle.textContent = type === "payment" ? "Editar cobrança" : "Editar saída";
-  els.financeEditSlot.innerHTML = type === "payment" ? renderPaymentEditForm(item) : renderExpenseEditForm(item);
+  els.financeEditTitle.textContent = type === "payment" ? "Editar cobrança" : type === "cashEntry" ? "Editar entrada" : "Editar saída";
+  els.financeEditSlot.innerHTML = type === "payment" ? renderPaymentEditForm(item) : type === "cashEntry" ? renderCashEntryEditForm(item) : renderExpenseEditForm(item);
   els.financeEditPopup.classList.remove("hidden");
 }
 
@@ -3046,6 +3118,17 @@ function renderExpenseEditForm(expense) {
   `;
 }
 
+function renderCashEntryEditForm(entry) {
+  return `
+    <form class="finance-form finance-edit-form" id="financeCashEntryEditForm" data-entry-id="${entry.id}">
+      <label>Descrição<input name="description" value="${escapeHtml(entry.description || "")}" required></label>
+      <label>Valor<input name="amount" type="text" inputmode="decimal" value="${formatMoneyInput(entry.amount)}" required></label>
+      <label>Data<input name="receivedAt" type="date" value="${String(entry.receivedAt || entry.createdAt || "").slice(0, 10)}"></label>
+      <button class="primary-action" type="submit">Salvar alteração</button>
+    </form>
+  `;
+}
+
 function savePaymentEdit(form) {
   const payment = profile.finance.payments.find((item) => item.id === form.dataset.paymentId);
   if (!payment) return;
@@ -3077,6 +3160,18 @@ function saveExpenseEdit(form) {
   expense.status = data.get("status") || expense.status;
   const paidAt = data.get("paidAt");
   expense.paidAt = expense.status === "paid" ? (paidAt ? new Date(`${paidAt}T12:00:00`).toISOString() : expense.paidAt || new Date().toISOString()) : "";
+  saveStore();
+  closeFinanceEditPopup();
+  renderFinance();
+}
+
+function saveCashEntryEdit(form) {
+  const entry = (profile.finance.cashEntries || []).find((item) => item.id === form.dataset.entryId);
+  if (!entry) return;
+  const data = new FormData(form);
+  entry.description = String(data.get("description") || "").trim() || entry.description;
+  entry.amount = parseMoneyInput(data.get("amount"));
+  entry.receivedAt = data.get("receivedAt") || entry.receivedAt || new Date().toISOString().slice(0, 10);
   saveStore();
   closeFinanceEditPopup();
   renderFinance();
@@ -3211,6 +3306,7 @@ function openDailySummaryWhatsapp() {
 function financeReportText() {
   const summary = financeSummary();
   const recentPayments = profile.finance.payments.slice(-8).map((item) => `+ ${item.playerName}: ${money(item.amount)} (${paymentStatusLabel(item.status)})`);
+  const recentCashEntries = (profile.finance.cashEntries || []).slice(-8).map((item) => `+ ${item.description}: ${money(item.amount)} (entrada manual)`);
   const recentExpenses = profile.finance.expenses.slice(-8).map((item) => `- ${item.description}: ${money(item.amount)} (${item.status === "future" ? "futura" : "paga"})`);
   return [
     `Prestação de contas - ${profile.peladaName}`,
@@ -3220,7 +3316,7 @@ function financeReportText() {
     `Despesas pagas: ${money(summary.expenses)}`,
     "",
     "Últimas entradas:",
-    recentPayments.join("\n") || "Sem entradas.",
+    [...recentPayments, ...recentCashEntries].join("\n") || "Sem entradas.",
     "",
     "Últimas saídas:",
     recentExpenses.join("\n") || "Sem saídas."
@@ -3280,6 +3376,9 @@ function buildFinancePayload() {
       .filter((item) => item.status === "pending")
       .slice(-12)
       .map((item) => ({ name: item.playerName, amount: item.amount, dueDate: item.dueDate })),
+    cashEntries: (finance.cashEntries || [])
+      .slice(-12)
+      .map((item) => ({ description: item.description, amount: item.amount, receivedAt: item.receivedAt || item.createdAt })),
     expenses: finance.expenses
       .slice(-12)
       .map((item) => ({ description: item.description, amount: item.amount, status: item.status, dueDate: item.dueDate || item.createdAt }))
@@ -3302,7 +3401,7 @@ function renderPublicFinancePayload(payload) {
     <section class="data-card ranking-card">
       <h3>Últimas entradas</h3>
       <div class="data-list">
-        ${payload.payments?.length ? payload.payments.map((item) => `<div class="summary-row"><strong>${escapeHtml(item.name)}</strong><span>${money(item.amount)} | ${escapeHtml(item.status)}</span></div>`).join("") : "<p>Sem entradas recentes.</p>"}
+        ${[...(payload.payments || []).map((item) => ({ title: item.name, amount: item.amount, meta: item.status })), ...(payload.cashEntries || []).map((item) => ({ title: item.description, amount: item.amount, meta: "entrada manual" }))].length ? [...(payload.payments || []).map((item) => ({ title: item.name, amount: item.amount, meta: item.status })), ...(payload.cashEntries || []).map((item) => ({ title: item.description, amount: item.amount, meta: "entrada manual" }))].map((item) => `<div class="summary-row"><strong>${escapeHtml(item.title)}</strong><span>${money(item.amount)} | ${escapeHtml(item.meta)}</span></div>`).join("") : "<p>Sem entradas recentes.</p>"}
       </div>
     </section>
     <section class="data-card ranking-card">
@@ -4667,6 +4766,7 @@ els.financeEditPopup?.addEventListener("submit", (event) => {
   const form = event.target.closest("form");
   if (form?.matches("#financePaymentEditForm")) savePaymentEdit(form);
   if (form?.matches("#financeExpenseEditForm")) saveExpenseEdit(form);
+  if (form?.matches("#financeCashEntryEditForm")) saveCashEntryEdit(form);
 });
 els.matchTimeline.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-goal]");
@@ -4716,6 +4816,7 @@ els.financeGrid.addEventListener("submit", (event) => {
   if (!form) return;
   if (form.matches("#financeSettingsForm")) saveFinanceSettings(event);
   if (form.matches("#manualChargeForm")) addManualCharge(event);
+  if (form.matches("#financeEntryForm")) addFinanceEntry(event);
   if (form.matches("#financeExpenseForm")) addFinanceExpense(event);
 });
 els.financeGrid.addEventListener("input", (event) => {
@@ -4750,6 +4851,13 @@ els.financeGrid.addEventListener("click", (event) => {
     const form = addExpense.closest("#financeExpenseForm");
     if (form && !form.reportValidity()) return;
     if (form) addFinanceExpense({ preventDefault() {}, currentTarget: form });
+    return;
+  }
+  const addEntry = event.target.closest("[data-add-finance-entry]");
+  if (addEntry) {
+    const form = addEntry.closest("#financeEntryForm");
+    if (form && !form.reportValidity()) return;
+    if (form) addFinanceEntry({ preventDefault() {}, currentTarget: form });
     return;
   }
   const monthly = event.target.closest("[data-create-monthly-charges]");
@@ -4816,6 +4924,16 @@ els.financeGrid.addEventListener("click", (event) => {
   const deleteExpenseButton = event.target.closest("[data-delete-expense]");
   if (deleteExpenseButton) {
     deleteExpense(deleteExpenseButton.dataset.deleteExpense);
+    return;
+  }
+  const editCashEntryButton = event.target.closest("[data-edit-cash-entry]");
+  if (editCashEntryButton) {
+    editCashEntry(editCashEntryButton.dataset.editCashEntry);
+    return;
+  }
+  const deleteCashEntryButton = event.target.closest("[data-delete-cash-entry]");
+  if (deleteCashEntryButton) {
+    deleteCashEntry(deleteCashEntryButton.dataset.deleteCashEntry);
     return;
   }
   const applyFilters = event.target.closest("[data-apply-payment-filters]");
