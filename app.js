@@ -122,6 +122,10 @@ const els = {
   goalPopupSlot: document.querySelector("#goalPopupSlot"),
   goalPopupTitle: document.querySelector("#goalPopupTitle"),
   closeGoalPopup: document.querySelector("#closeGoalPopup"),
+  financeEditPopup: document.querySelector("#financeEditPopup"),
+  financeEditSlot: document.querySelector("#financeEditSlot"),
+  financeEditTitle: document.querySelector("#financeEditTitle"),
+  closeFinanceEditPopup: document.querySelector("#closeFinanceEditPopup"),
   goalTeam: document.querySelector("#goalTeam"),
   ownGoal: document.querySelector("#ownGoal"),
   goalPlayer: document.querySelector("#goalPlayer"),
@@ -2448,7 +2452,7 @@ function renderFinance() {
           </select>
         </label>
         <label>Motivo<input name="note" placeholder="Ex: mensalidade proporcional"></label>
-        <button class="primary-action" type="submit">Adicionar cobrança</button>
+        <button class="primary-action" data-add-manual-charge type="button">Adicionar cobrança</button>
       </form>
     </section>
 
@@ -2464,7 +2468,7 @@ function renderFinance() {
             <option value="future">Conta futura</option>
           </select>
         </label>
-        <button class="primary-action" type="submit">Adicionar saída</button>
+        <button class="primary-action" data-add-finance-expense type="button">Adicionar saída</button>
       </form>
     </section>
 
@@ -2943,24 +2947,7 @@ function updatePaymentStatus(id, status) {
 function editPayment(id) {
   const payment = profile.finance.payments.find((item) => item.id === id);
   if (!payment) return;
-  const amount = prompt("Valor da cobrança", formatMoneyInput(payment.amount));
-  if (amount === null) return;
-  const dueDate = prompt("Vencimento da cobrança (aaaa-mm-dd)", String(payment.dueDate || "").slice(0, 10));
-  if (dueDate === null) return;
-  const status = prompt("Status: pendente, pago ou grátis", paymentStatusLabel(payment.status || "pending"));
-  if (status === null) return;
-  const normalizedStatus = parsePaymentStatus(status, payment.status);
-  const note = prompt("Observação/motivo", payment.note || "");
-  if (note === null) return;
-  payment.amount = parseMoneyInput(amount);
-  payment.dueDate = dueDate || payment.dueDate;
-  payment.status = normalizedStatus;
-  payment.note = note.trim();
-  payment.paidAt = normalizedStatus === "paid" ? (payment.paidAt || new Date().toISOString()) : "";
-  payment.freeAt = normalizedStatus === "free" ? (payment.freeAt || new Date().toISOString()) : "";
-  payment.uniqueKey = paymentUniqueKey(payment);
-  saveStore();
-  renderFinance();
+  openFinanceEditPopup("payment", payment);
 }
 
 function deletePayment(id) {
@@ -2988,28 +2975,110 @@ function updateExpenseStatus(id, status) {
 function editExpense(id) {
   const expense = profile.finance.expenses.find((item) => item.id === id);
   if (!expense) return;
-  const description = prompt("Descrição da saída", expense.description || "");
-  if (description === null) return;
-  const amount = prompt("Valor da saída", formatMoneyInput(expense.amount));
-  if (amount === null) return;
-  const dueDate = prompt("Data de vencimento (aaaa-mm-dd)", String(expense.dueDate || "").slice(0, 10));
-  if (dueDate === null) return;
-  const status = prompt("Status: pago ou futuro", expense.status === "future" ? "futuro" : "pago");
-  if (status === null) return;
-  const normalizedStatus = parseExpenseStatus(status, expense.status);
-  expense.description = description.trim() || expense.description;
-  expense.amount = parseMoneyInput(amount);
-  expense.dueDate = dueDate || expense.dueDate;
-  expense.status = normalizedStatus;
-  expense.paidAt = normalizedStatus === "paid" ? (expense.paidAt || new Date().toISOString()) : "";
-  saveStore();
-  renderFinance();
+  openFinanceEditPopup("expense", expense);
 }
 
 function deleteExpense(id) {
   if (!confirm("Apagar esta saída?")) return;
   profile.finance.expenses = profile.finance.expenses.filter((item) => item.id !== id);
   saveStore();
+  renderFinance();
+}
+
+function openFinanceEditPopup(type, item) {
+  if (!els.financeEditPopup || !els.financeEditSlot) return;
+  els.financeEditTitle.textContent = type === "payment" ? "Editar cobrança" : "Editar saída";
+  els.financeEditSlot.innerHTML = type === "payment" ? renderPaymentEditForm(item) : renderExpenseEditForm(item);
+  els.financeEditPopup.classList.remove("hidden");
+}
+
+function closeFinanceEditPopup() {
+  if (!els.financeEditPopup || !els.financeEditSlot) return;
+  els.financeEditSlot.innerHTML = "";
+  els.financeEditPopup.classList.add("hidden");
+}
+
+function renderPaymentEditForm(payment) {
+  return `
+    <form class="finance-form finance-edit-form" id="financePaymentEditForm" data-payment-id="${payment.id}">
+      <label>Jogador
+        <select name="playerId" required>
+          ${profile.players.slice().sort((a, b) => `${a.firstName} ${a.lastName}`.localeCompare(`${b.firstName} ${b.lastName}`)).map((player) => `<option value="${player.id}" ${player.id === payment.playerId ? "selected" : ""}>${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)}</option>`).join("")}
+        </select>
+      </label>
+      <label>Tipo
+        <select name="kind">
+          <option value="mensalista" ${payment.kind === "mensalista" ? "selected" : ""}>Mensalista</option>
+          <option value="suplente" ${payment.kind === "suplente" ? "selected" : ""}>Suplente</option>
+        </select>
+      </label>
+      <label>Valor<input name="amount" type="text" inputmode="decimal" value="${formatMoneyInput(payment.amount)}" required></label>
+      <label>Vencimento<input name="dueDate" type="date" value="${String(payment.dueDate || "").slice(0, 10)}"></label>
+      <label>Status
+        <select name="status">
+          <option value="pending" ${payment.status === "pending" ? "selected" : ""}>Pendente</option>
+          <option value="paid" ${payment.status === "paid" ? "selected" : ""}>Pago</option>
+          <option value="free" ${payment.status === "free" ? "selected" : ""}>Grátis/isento</option>
+        </select>
+      </label>
+      <label>Data de pagamento<input name="paidAt" type="date" value="${String(payment.paidAt || payment.freeAt || "").slice(0, 10)}"></label>
+      <label>Motivo<input name="note" value="${escapeHtml(payment.note || "")}"></label>
+      <button class="primary-action" type="submit">Salvar alteração</button>
+    </form>
+  `;
+}
+
+function renderExpenseEditForm(expense) {
+  return `
+    <form class="finance-form finance-edit-form" id="financeExpenseEditForm" data-expense-id="${expense.id}">
+      <label>Descrição<input name="description" value="${escapeHtml(expense.description || "")}" required></label>
+      <label>Valor<input name="amount" type="text" inputmode="decimal" value="${formatMoneyInput(expense.amount)}" required></label>
+      <label>Vencimento<input name="dueDate" type="date" value="${String(expense.dueDate || "").slice(0, 10)}"></label>
+      <label>Status
+        <select name="status">
+          <option value="paid" ${expense.status === "paid" ? "selected" : ""}>Pago</option>
+          <option value="future" ${expense.status === "future" ? "selected" : ""}>Conta futura</option>
+        </select>
+      </label>
+      <label>Data de pagamento<input name="paidAt" type="date" value="${String(expense.paidAt || "").slice(0, 10)}"></label>
+      <button class="primary-action" type="submit">Salvar alteração</button>
+    </form>
+  `;
+}
+
+function savePaymentEdit(form) {
+  const payment = profile.finance.payments.find((item) => item.id === form.dataset.paymentId);
+  if (!payment) return;
+  const data = new FormData(form);
+  const player = profile.players.find((item) => item.id === data.get("playerId"));
+  payment.playerId = data.get("playerId") || payment.playerId;
+  payment.playerName = player ? `${player.firstName} ${player.lastName}`.trim() : payment.playerName;
+  payment.kind = data.get("kind") || payment.kind;
+  payment.amount = parseMoneyInput(data.get("amount"));
+  payment.dueDate = data.get("dueDate") || payment.dueDate;
+  payment.status = data.get("status") || payment.status;
+  payment.note = String(data.get("note") || "").trim();
+  const paidAt = data.get("paidAt");
+  payment.paidAt = payment.status === "paid" ? (paidAt ? new Date(`${paidAt}T12:00:00`).toISOString() : payment.paidAt || new Date().toISOString()) : "";
+  payment.freeAt = payment.status === "free" ? (paidAt ? new Date(`${paidAt}T12:00:00`).toISOString() : payment.freeAt || new Date().toISOString()) : "";
+  payment.uniqueKey = paymentUniqueKey(payment);
+  saveStore();
+  closeFinanceEditPopup();
+  renderFinance();
+}
+
+function saveExpenseEdit(form) {
+  const expense = profile.finance.expenses.find((item) => item.id === form.dataset.expenseId);
+  if (!expense) return;
+  const data = new FormData(form);
+  expense.description = String(data.get("description") || "").trim() || expense.description;
+  expense.amount = parseMoneyInput(data.get("amount"));
+  expense.dueDate = data.get("dueDate") || expense.dueDate;
+  expense.status = data.get("status") || expense.status;
+  const paidAt = data.get("paidAt");
+  expense.paidAt = expense.status === "paid" ? (paidAt ? new Date(`${paidAt}T12:00:00`).toISOString() : expense.paidAt || new Date().toISOString()) : "";
+  saveStore();
+  closeFinanceEditPopup();
   renderFinance();
 }
 
@@ -4589,6 +4658,16 @@ els.closeGoalPopup.addEventListener("click", closeGoalPopup);
 els.goalPopup.addEventListener("click", (event) => {
   if (event.target === els.goalPopup) closeGoalPopup();
 });
+els.closeFinanceEditPopup?.addEventListener("click", closeFinanceEditPopup);
+els.financeEditPopup?.addEventListener("click", (event) => {
+  if (event.target === els.financeEditPopup) closeFinanceEditPopup();
+});
+els.financeEditPopup?.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const form = event.target.closest("form");
+  if (form?.matches("#financePaymentEditForm")) savePaymentEdit(form);
+  if (form?.matches("#financeExpenseEditForm")) saveExpenseEdit(form);
+});
 els.matchTimeline.addEventListener("click", (event) => {
   const editButton = event.target.closest("[data-edit-goal]");
   if (editButton) {
@@ -4633,9 +4712,11 @@ els.importBackup.addEventListener("change", importBackup);
 els.publishShare.addEventListener("click", publishSharePage);
 els.publishFinanceShare.addEventListener("click", publishFinanceSharePage);
 els.financeGrid.addEventListener("submit", (event) => {
-  if (event.target.matches("#financeSettingsForm")) saveFinanceSettings(event);
-  if (event.target.matches("#manualChargeForm")) addManualCharge(event);
-  if (event.target.matches("#financeExpenseForm")) addFinanceExpense(event);
+  const form = event.target.closest("form");
+  if (!form) return;
+  if (form.matches("#financeSettingsForm")) saveFinanceSettings(event);
+  if (form.matches("#manualChargeForm")) addManualCharge(event);
+  if (form.matches("#financeExpenseForm")) addFinanceExpense(event);
 });
 els.financeGrid.addEventListener("input", (event) => {
   if (event.target.matches("[data-payment-search]")) {
@@ -4657,6 +4738,20 @@ els.financeGrid.addEventListener("change", (event) => {
   }
 });
 els.financeGrid.addEventListener("click", (event) => {
+  const addManual = event.target.closest("[data-add-manual-charge]");
+  if (addManual) {
+    const form = addManual.closest("#manualChargeForm");
+    if (form && !form.reportValidity()) return;
+    if (form) addManualCharge({ preventDefault() {}, currentTarget: form });
+    return;
+  }
+  const addExpense = event.target.closest("[data-add-finance-expense]");
+  if (addExpense) {
+    const form = addExpense.closest("#financeExpenseForm");
+    if (form && !form.reportValidity()) return;
+    if (form) addFinanceExpense({ preventDefault() {}, currentTarget: form });
+    return;
+  }
   const monthly = event.target.closest("[data-create-monthly-charges]");
   if (monthly) {
     createMonthlyCharges();
