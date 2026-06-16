@@ -61,6 +61,7 @@ let supabaseClient = null;
 let currentUser = null;
 let isCloudMode = false;
 let publicSharePayload = null;
+let activeMatchPopup = "";
 
 const els = {
   authShell: document.querySelector("#authShell"),
@@ -1068,9 +1069,13 @@ function renderSetup() {
           </select>
         </label>
         <form class="player-form" data-team-form="${key}">
-          <select name="player" ${availablePlayersForTeam(key).length ? "" : "disabled"}>
-            ${renderPlayerOptions(key)}
-          </select>
+          ${renderPlayerSearchField({
+            name: "player",
+            placeholder: "Pesquisar jogador",
+            options: availablePlayersForTeam(key),
+            disabled: !availablePlayersForTeam(key).length,
+            listId: `team-add-${key}`
+          })}
           <button class="icon-button" title="Adicionar jogador">+</button>
         </form>
         ${profile.players.length ? "" : `<p>Cadastre jogadores na aba Jogadores.</p>`}
@@ -1090,6 +1095,71 @@ function selectedPlayerRefs() {
 function availablePlayersForTeam(teamKey) {
   const selected = selectedPlayerRefs();
   return profile.players.filter((player) => !selected.includes(player.id));
+}
+
+function renderPlayerSearchField({ name, placeholder, options, disabled = false, listId, optional = false, value = "" }) {
+  const playerOptions = (options || []).map((option) => {
+    const ref = typeof option === "string" ? option : option.id;
+    const label = playerDisplayName(ref);
+    const suffix = typeof option === "string" ? "" : option.detail ? ` (${option.detail})` : "";
+    return { ref, label, value: `${label}${suffix}` };
+  });
+  const selected = value ? playerOptions.find((item) => item.ref === value) : null;
+  return `
+    <input type="hidden" name="${name}" value="${escapeHtml(value)}">
+    <input
+      class="player-search"
+      data-player-search="${name}"
+      list="${listId}"
+      placeholder="${placeholder}"
+      value="${escapeHtml(selected?.value || "")}"
+      ${disabled ? "disabled" : ""}
+      ${optional ? "" : "required"}
+      autocomplete="off"
+    >
+    <datalist id="${listId}">
+      ${optional ? `<option value="Ninguem sai"></option>` : ""}
+      ${playerOptions.map((item) => `<option value="${escapeHtml(item.value)}" data-ref="${escapeHtml(item.ref)}"></option>`).join("")}
+    </datalist>
+  `;
+}
+
+function resolvePlayerSearch(form, name) {
+  const hidden = form.elements[name];
+  const input = form.querySelector(`[data-player-search="${name}"]`);
+  if (!input) return hidden?.value || "";
+  const typed = normalizeText(input.value);
+  if (!typed || typed === normalizeText("Ninguem sai")) {
+    if (hidden) hidden.value = "";
+    return "";
+  }
+  const options = Array.from(form.querySelectorAll(`datalist#${input.getAttribute("list")} option`));
+  const match = options.find((option) => normalizeText(option.value) === typed) ||
+    options.find((option) => normalizeText(option.value).includes(typed));
+  const ref = match?.dataset.ref || hidden?.value || "";
+  if (hidden) hidden.value = ref;
+  return ref;
+}
+
+function syncPlayerSearchInput(input) {
+  const form = input.closest("form");
+  if (!form) return;
+  const name = input.dataset.playerSearch;
+  const hidden = form.elements[name];
+  const typed = normalizeText(input.value);
+  if (!typed || typed === normalizeText("Ninguem sai")) {
+    if (hidden) hidden.value = "";
+    return;
+  }
+  const listId = input.getAttribute("list");
+  const option = Array.from(form.querySelectorAll(`datalist#${listId} option`))
+    .find((item) => normalizeText(item.value) === typed);
+  if (hidden && option?.dataset.ref) hidden.value = option.dataset.ref;
+}
+
+function handlePlayerSearchInput(event) {
+  const input = event.target.closest("[data-player-search]");
+  if (input) syncPlayerSearchInput(input);
 }
 
 function renderPlayerOptions(teamKey) {
@@ -1317,7 +1387,10 @@ function renderTeamPanel(teamKey) {
     return `<span class="mini-pill ${playerType(ref)} ${isGuest ? "guest" : ""}">${escapeHtml(playerDisplayName(ref))}${isGuest ? " emprestado" : ""}</span>`;
   }).join("");
   return `
-    <p class="eyebrow">Time ${meta.name}</p>
+    <div class="team-panel-head">
+      <p class="eyebrow">Time ${meta.name}</p>
+      <button class="secondary-action compact-action" data-open-substitution="${teamKey}" type="button">Substituir</button>
+    </div>
     <button class="primary-action quick-goal" data-quick-goal="${teamKey}" type="button">+1 gol</button>
     <div class="score" data-score-team="${teamKey}">${score}</div>
     <div class="players-mini">${players}</div>
@@ -1326,6 +1399,7 @@ function renderTeamPanel(teamKey) {
 
 function openGoalPopup(teamKey) {
   if (!draft.currentMatch) return;
+  activeMatchPopup = "goal";
   els.goalTeam.value = teamKey;
   els.ownGoal.checked = false;
   fillPlayerOptions();
@@ -1335,8 +1409,18 @@ function openGoalPopup(teamKey) {
 }
 
 function closeGoalPopup() {
-  els.goalFormHome.before(els.goalForm);
+  if (activeMatchPopup === "goal") els.goalFormHome.before(els.goalForm);
+  els.goalPopupSlot.innerHTML = "";
+  activeMatchPopup = "";
   els.goalPopup.classList.add("hidden");
+}
+
+function openSubstitutionPopup(teamKey) {
+  if (!draft.currentMatch) return;
+  activeMatchPopup = "substitution";
+  els.goalPopupTitle.textContent = `Substituir no ${teamName(teamKey)}`;
+  els.goalPopupSlot.innerHTML = renderLineupTeam(teamKey, "popup");
+  els.goalPopup.classList.remove("hidden");
 }
 
 function renderLineupCheck() {
@@ -1358,12 +1442,15 @@ function renderLineupCheck() {
   `;
 }
 
-function renderLineupTeam(teamKey) {
+function renderLineupTeam(teamKey, context = "lineup") {
   const base = draft.teams[teamKey].players;
   const guests = draft.currentMatch.guests[teamKey] || [];
   const out = draft.currentMatch.out?.[teamKey] || [];
   const currentRoster = matchRoster(teamKey);
-  const options = availableGuestPlayers(teamKey);
+  const options = availableGuestPlayers(teamKey).map((player) => ({
+    ...player,
+    detail: baseTeamOfPlayer(player.id) ? teamName(baseTeamOfPlayer(player.id)) : "fora"
+  }));
   return `
     <article class="lineup-card" style="--team-color: ${teamColor(teamKey)}">
       <h3>${teamName(teamKey)}</h3>
@@ -1384,18 +1471,23 @@ function renderLineupTeam(teamKey) {
       </div>
       <form class="complete-form" data-complete-team="${teamKey}">
         <label>Quem sai (opcional)
-          <select name="outgoing" ${currentRoster.length ? "" : "disabled"}>
-            <option value="">Ninguem sai</option>
-            ${currentRoster.map((ref) => `<option value="${escapeHtml(ref)}">${escapeHtml(playerDisplayName(ref))}</option>`).join("")}
-          </select>
+          ${renderPlayerSearchField({
+            name: "outgoing",
+            placeholder: "Ninguem sai",
+            options: currentRoster,
+            disabled: !currentRoster.length,
+            listId: `${context}-outgoing-${teamKey}`,
+            optional: true
+          })}
         </label>
         <label>Completar elenco
-          <select name="guest" ${options.length ? "" : "disabled"}>
-            ${options.length ? `<option value="">Escolha jogador</option>` + options.map((player) => {
-              const baseTeam = baseTeamOfPlayer(player.id);
-              return `<option value="${player.id}">${escapeHtml(player.firstName)} ${escapeHtml(player.lastName)} (${baseTeam ? teamName(baseTeam) : "fora"})</option>`;
-            }).join("") : `<option value="">Sem jogadores disponiveis</option>`}
-          </select>
+          ${renderPlayerSearchField({
+            name: "guest",
+            placeholder: options.length ? "Pesquisar jogador" : "Sem jogadores disponiveis",
+            options,
+            disabled: !options.length,
+            listId: `${context}-guest-${teamKey}`
+          })}
         </label>
         <button class="secondary-action" type="submit" ${options.length ? "" : "disabled"}>Adicionar</button>
       </form>
@@ -4639,13 +4731,14 @@ els.teamsGrid.addEventListener("submit", (event) => {
   if (!form) return;
   event.preventDefault();
   const teamKey = form.dataset.teamForm;
-  const ref = form.elements.player.value;
+  const ref = resolvePlayerSearch(form, "player");
   if (!ref || draft.teams[teamKey].players.includes(ref)) return;
   draft.teams[teamKey].players.push(ref);
   ensurePlayerStats(teamKey, ref);
-  form.elements.player.value = "";
   render();
 });
+els.teamsGrid.addEventListener("input", handlePlayerSearchInput);
+els.teamsGrid.addEventListener("change", handlePlayerSearchInput);
 
 els.teamsGrid.addEventListener("click", (event) => {
   const button = event.target.closest("[data-player]");
@@ -4678,9 +4771,16 @@ els.lineupCheck.addEventListener("submit", (event) => {
   const form = event.target.closest("[data-complete-team]");
   if (!form || !draft.currentMatch) return;
   event.preventDefault();
+  completeTeamFromForm(form);
+});
+els.lineupCheck.addEventListener("input", handlePlayerSearchInput);
+els.lineupCheck.addEventListener("change", handlePlayerSearchInput);
+
+function completeTeamFromForm(form) {
+  if (!form || !draft.currentMatch) return;
   const teamKey = form.dataset.completeTeam;
-  const ref = form.elements.guest.value;
-  const outgoing = form.elements.outgoing.value;
+  const ref = resolvePlayerSearch(form, "guest");
+  const outgoing = resolvePlayerSearch(form, "outgoing");
   if (!ref || ref === outgoing) return;
   draft.currentMatch.guests[teamKey] ||= [];
   draft.currentMatch.out ||= {};
@@ -4692,8 +4792,9 @@ els.lineupCheck.addEventListener("submit", (event) => {
   if (!draft.currentMatch.guests[teamKey].includes(ref)) {
     draft.currentMatch.guests[teamKey].push(ref);
   }
+  if (activeMatchPopup === "substitution") closeGoalPopup();
   render();
-});
+}
 
 els.lineupCheck.addEventListener("click", (event) => {
   const button = event.target.closest("[data-remove-guest]");
@@ -4749,15 +4850,27 @@ els.undoLastGoal.addEventListener("click", undoLastGoal);
 els.leftPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-quick-goal]");
   if (button) openGoalPopup(button.dataset.quickGoal);
+  const substitution = event.target.closest("[data-open-substitution]");
+  if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
 });
 els.rightPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-quick-goal]");
   if (button) openGoalPopup(button.dataset.quickGoal);
+  const substitution = event.target.closest("[data-open-substitution]");
+  if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
 });
 els.closeGoalPopup.addEventListener("click", closeGoalPopup);
 els.goalPopup.addEventListener("click", (event) => {
   if (event.target === els.goalPopup) closeGoalPopup();
 });
+els.goalPopup.addEventListener("submit", (event) => {
+  const form = event.target.closest("[data-complete-team]");
+  if (!form) return;
+  event.preventDefault();
+  completeTeamFromForm(form);
+});
+els.goalPopup.addEventListener("input", handlePlayerSearchInput);
+els.goalPopup.addEventListener("change", handlePlayerSearchInput);
 els.closeFinanceEditPopup?.addEventListener("click", closeFinanceEditPopup);
 els.financeEditPopup?.addEventListener("click", (event) => {
   if (event.target === els.financeEditPopup) closeFinanceEditPopup();
