@@ -1293,7 +1293,8 @@ function renderMatch() {
   els.fullScoreMode.textContent = els.matchView.classList.contains("full-score") ? "Sair do placar cheio" : "Placar cheio";
   els.appShell.classList.toggle("full-score-active", els.matchView.classList.contains("full-score"));
   els.startCountdown.classList.toggle("hidden", match.isRunning || match.isTimeUp);
-  els.endTimedMatch.classList.toggle("hidden", !match.isTimeUp);
+  els.endTimedMatch.textContent = match.isTimeUp ? "Encerrar partida" : "Encerrar partida agora";
+  els.endTimedMatch.classList.toggle("hidden", false);
   renderLineupCheck();
   els.matchHistoryLive.innerHTML = renderMatchHistoryPreview();
   els.matchHistoryLive.classList.toggle("hidden", !draft.completedMatches.length);
