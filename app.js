@@ -724,10 +724,7 @@ function availableGuestPlayers(targetTeamKey) {
   const match = draft.currentMatch;
   if (!match) return [];
   const alreadyInTarget = new Set(matchRoster(targetTeamKey, match));
-  return profile.players.filter((player) => {
-    if (alreadyInTarget.has(player.id)) return false;
-    return teamKeys().some((key) => draft.teams[key].players.includes(player.id));
-  });
+  return profile.players.filter((player) => !alreadyInTarget.has(player.id));
 }
 
 function availableComplementPlayers(targetTeamKey, match = draft.finishedMatch || draft.currentMatch) {
@@ -1130,21 +1127,28 @@ function renderPlayerSearchField({ name, placeholder, options, disabled = false,
   });
   const selected = value ? playerOptions.find((item) => item.ref === value) : null;
   return `
-    <input type="hidden" name="${name}" value="${escapeHtml(value)}">
-    <input
-      class="player-search"
-      data-player-search="${name}"
-      list="${listId}"
-      placeholder="${placeholder}"
-      value="${escapeHtml(selected?.value || "")}"
-      ${disabled ? "disabled" : ""}
-      ${optional ? "" : "required"}
-      autocomplete="off"
-    >
-    <datalist id="${listId}">
-      ${optional ? `<option value="Ninguem sai"></option>` : ""}
-      ${playerOptions.map((item) => `<option value="${escapeHtml(item.value)}" data-ref="${escapeHtml(item.ref)}"></option>`).join("")}
-    </datalist>
+    <div class="player-search-control" data-player-search-control>
+      <input type="hidden" name="${name}" value="${escapeHtml(value)}">
+      <input
+        class="player-search"
+        data-player-search="${name}"
+        data-player-list="${listId}"
+        placeholder="${placeholder}"
+        value="${escapeHtml(selected?.value || "")}"
+        ${disabled ? "disabled" : ""}
+        ${optional ? "" : "required"}
+        autocomplete="off"
+      >
+      <div class="player-search-options hidden" id="${listId}" data-player-options>
+        ${optional ? `<button type="button" data-player-option data-ref="" data-label="Ninguem sai">Ninguem sai</button>` : ""}
+        ${playerOptions.map((item) => `
+          <button type="button" data-player-option data-ref="${escapeHtml(item.ref)}" data-label="${escapeHtml(item.value)}">
+            ${escapeHtml(item.value)}
+          </button>
+        `).join("")}
+        <p class="player-search-empty hidden" data-player-search-empty>Nenhum jogador encontrado.</p>
+      </div>
+    </div>
   `;
 }
 
@@ -1157,9 +1161,9 @@ function resolvePlayerSearch(form, name) {
     if (hidden) hidden.value = "";
     return "";
   }
-  const options = Array.from(form.querySelectorAll(`datalist#${input.getAttribute("list")} option`));
-  const match = options.find((option) => normalizeText(option.value) === typed) ||
-    options.find((option) => normalizeText(option.value).includes(typed));
+  const control = input.closest("[data-player-search-control]");
+  const options = Array.from(control?.querySelectorAll("[data-player-option]") || []);
+  const match = options.find((option) => normalizeText(option.dataset.label) === typed);
   const ref = match?.dataset.ref || hidden?.value || "";
   if (hidden) hidden.value = ref;
   return ref;
@@ -1171,19 +1175,42 @@ function syncPlayerSearchInput(input) {
   const name = input.dataset.playerSearch;
   const hidden = form.elements[name];
   const typed = normalizeText(input.value);
-  if (!typed || typed === normalizeText("Ninguem sai")) {
-    if (hidden) hidden.value = "";
-    return;
-  }
-  const listId = input.getAttribute("list");
-  const option = Array.from(form.querySelectorAll(`datalist#${listId} option`))
-    .find((item) => normalizeText(item.value) === typed);
-  if (hidden && option?.dataset.ref) hidden.value = option.dataset.ref;
+  const control = input.closest("[data-player-search-control]");
+  const optionsPanel = control?.querySelector("[data-player-options]");
+  const options = Array.from(control?.querySelectorAll("[data-player-option]") || []);
+  const exact = options.find((item) => normalizeText(item.dataset.label) === typed);
+  if (hidden) hidden.value = exact?.dataset.ref || "";
+  let visibleCount = 0;
+  options.forEach((option) => {
+    const visible = !typed || normalizeText(option.dataset.label).startsWith(typed);
+    option.classList.toggle("hidden", !visible);
+    if (visible) visibleCount += 1;
+  });
+  control?.querySelector("[data-player-search-empty]")?.classList.toggle("hidden", visibleCount > 0);
+  optionsPanel?.classList.remove("hidden");
 }
 
 function handlePlayerSearchInput(event) {
   const input = event.target.closest("[data-player-search]");
   if (input) syncPlayerSearchInput(input);
+}
+
+function selectPlayerSearchOption(button) {
+  const control = button.closest("[data-player-search-control]");
+  const input = control?.querySelector("[data-player-search]");
+  const form = control?.closest("form");
+  if (!input || !form) return;
+  input.value = button.dataset.label || "";
+  if (form.elements[input.dataset.playerSearch]) {
+    form.elements[input.dataset.playerSearch].value = button.dataset.ref || "";
+  }
+  control.querySelector("[data-player-options]")?.classList.add("hidden");
+}
+
+function closePlayerSearchOptions(exceptControl = null) {
+  document.querySelectorAll("[data-player-search-control]").forEach((control) => {
+    if (control !== exceptControl) control.querySelector("[data-player-options]")?.classList.add("hidden");
+  });
 }
 
 function renderPlayerOptions(teamKey) {
@@ -1415,6 +1442,7 @@ function renderTeamPanel(teamKey) {
       <p class="eyebrow">Time ${meta.name}</p>
       <div class="team-panel-actions">
         <button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>
+        <button class="secondary-action compact-action" data-remove-team-player="${teamKey}" type="button">- Jogador</button>
         <button class="secondary-action compact-action" data-open-substitution="${teamKey}" type="button">Substituir</button>
       </div>
     </div>
@@ -1482,6 +1510,49 @@ function addLatePlayerFromForm(form) {
   }
   draft.teams[teamKey].players.push(ref);
   ensurePlayerStats(teamKey, ref);
+  closeGoalPopup();
+  render();
+}
+
+function openRemovePlayerPopup(teamKey) {
+  if (!draft.currentMatch) return;
+  const options = draft.teams[teamKey]?.players || [];
+  activeMatchPopup = "remove-player";
+  els.goalPopupTitle.textContent = `Retirar do ${teamName(teamKey)}`;
+  els.goalPopupSlot.innerHTML = options.length ? `
+    <form class="late-player-form" data-remove-player-team="${teamKey}">
+      <p>Os dados que o jogador ja registrou nesta pelada serao mantidos.</p>
+      <label>Jogador que saiu
+        ${renderPlayerSearchField({
+          name: "player",
+          placeholder: "Pesquisar jogador",
+          options,
+          listId: `remove-player-${teamKey}`
+        })}
+      </label>
+      <button class="danger-action" type="submit">Retirar jogador</button>
+    </form>
+  ` : `<p>Este time nao possui jogadores no elenco-base.</p>`;
+  els.goalPopup.classList.remove("hidden");
+}
+
+function removePlayerFromCurrentSession(form) {
+  if (!form || !draft.currentMatch) return;
+  const teamKey = form.dataset.removePlayerTeam;
+  const ref = resolvePlayerSearch(form, "player");
+  if (!ref || !draft.teams[teamKey]?.players?.includes(ref)) {
+    alert("Escolha um jogador deste time.");
+    return;
+  }
+  if (!confirm(`Retirar ${playerDisplayName(ref)} do elenco do ${teamName(teamKey)}?`)) return;
+  draft.teams[teamKey].players = draft.teams[teamKey].players.filter((player) => player !== ref);
+  Object.keys(draft.currentMatch.guests || {}).forEach((key) => {
+    draft.currentMatch.guests[key] = (draft.currentMatch.guests[key] || []).filter((player) => player !== ref);
+  });
+  Object.keys(draft.currentMatch.out || {}).forEach((key) => {
+    draft.currentMatch.out[key] = (draft.currentMatch.out[key] || []).filter((player) => player !== ref);
+  });
+  draft.pendingComplements = (draft.pendingComplements || []).filter((item) => item.guest !== ref && item.outgoing !== ref);
   closeGoalPopup();
   render();
 }
@@ -1566,7 +1637,10 @@ function renderBench() {
       <span class="bench-team">
         <span class="swatch" style="background: ${teamColor(teamKey)}"></span>
         ${index + 1}. ${escapeHtml(teamName(teamKey))}
-        ${draft.currentMatch ? `<button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>` : ""}
+        ${draft.currentMatch ? `
+          <button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>
+          <button class="secondary-action compact-action" data-remove-team-player="${teamKey}" type="button">- Jogador</button>
+        ` : ""}
       </span>
     `).join("") : "<span class=\"bench-team\">Sem banco</span>"}
   `;
@@ -4875,6 +4949,7 @@ function completeTeamFromForm(form) {
   if (!draft.currentMatch.guests[teamKey].includes(ref)) {
     draft.currentMatch.guests[teamKey].push(ref);
   }
+  ensurePlayerStats(teamKey, ref);
   if (activeMatchPopup === "substitution") closeGoalPopup();
   render();
 }
@@ -4942,6 +5017,8 @@ els.leftPanel.addEventListener("click", (event) => {
   if (button) openGoalPopup(button.dataset.quickGoal);
   const latePlayer = event.target.closest("[data-add-late-player]");
   if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
+  const removePlayer = event.target.closest("[data-remove-team-player]");
+  if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
 });
@@ -4950,18 +5027,28 @@ els.rightPanel.addEventListener("click", (event) => {
   if (button) openGoalPopup(button.dataset.quickGoal);
   const latePlayer = event.target.closest("[data-add-late-player]");
   if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
+  const removePlayer = event.target.closest("[data-remove-team-player]");
+  if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
 });
 els.benchStrip.addEventListener("click", (event) => {
   const latePlayer = event.target.closest("[data-add-late-player]");
   if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
+  const removePlayer = event.target.closest("[data-remove-team-player]");
+  if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
 });
 els.closeGoalPopup.addEventListener("click", closeGoalPopup);
 els.goalPopup.addEventListener("click", (event) => {
   if (event.target === els.goalPopup) closeGoalPopup();
 });
 els.goalPopup.addEventListener("submit", (event) => {
+  const removePlayerForm = event.target.closest("[data-remove-player-team]");
+  if (removePlayerForm) {
+    event.preventDefault();
+    removePlayerFromCurrentSession(removePlayerForm);
+    return;
+  }
   const latePlayerForm = event.target.closest("[data-late-player-team]");
   if (latePlayerForm) {
     event.preventDefault();
@@ -4975,6 +5062,22 @@ els.goalPopup.addEventListener("submit", (event) => {
 });
 els.goalPopup.addEventListener("input", handlePlayerSearchInput);
 els.goalPopup.addEventListener("change", handlePlayerSearchInput);
+
+document.addEventListener("focusin", (event) => {
+  const input = event.target.closest("[data-player-search]");
+  if (!input || input.disabled) return;
+  closePlayerSearchOptions(input.closest("[data-player-search-control]"));
+  syncPlayerSearchInput(input);
+});
+
+document.addEventListener("click", (event) => {
+  const option = event.target.closest("[data-player-option]");
+  if (option) {
+    selectPlayerSearchOption(option);
+    return;
+  }
+  if (!event.target.closest("[data-player-search-control]")) closePlayerSearchOptions();
+});
 els.closeFinanceEditPopup?.addEventListener("click", closeFinanceEditPopup);
 els.financeEditPopup?.addEventListener("click", (event) => {
   if (event.target === els.financeEditPopup) closeFinanceEditPopup();

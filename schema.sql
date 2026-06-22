@@ -20,7 +20,7 @@ alter table public.pelada_profiles
   add column if not exists email text;
 
 alter table public.pelada_profiles
-  add column if not exists finance jsonb not null default '{"settings":{"monthlyAmount":0,"substituteAmount":0,"monthlyFrequency":"mensal","monthlyChargeDay":10,"pixKey":"","cashInitial":0},"payments":[],"cashEntries":[],"expenses":[],"publicShares":{}}'::jsonb;
+  add column if not exists finance jsonb not null default '{"settings":{"monthlyAmount":0,"substituteAmount":0,"monthlyFrequency":"mensal","monthlyChargeDay":10,"pixKey":"","cashInitial":0},"payments":[],"expenses":[],"publicShares":{}}'::jsonb;
 
 create unique index if not exists pelada_profiles_email_unique
 on public.pelada_profiles (lower(email));
