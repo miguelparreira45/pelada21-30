@@ -97,6 +97,10 @@ const els = {
   finalView: document.querySelector("#finalView"),
   teamsGrid: document.querySelector("#teamsGrid"),
   drawMatch: document.querySelector("#drawMatch"),
+  chooseFirstMatch: document.querySelector("#chooseFirstMatch"),
+  manualMatchChoice: document.querySelector("#manualMatchChoice"),
+  manualMatchForm: document.querySelector("#manualMatchForm"),
+  cancelManualMatch: document.querySelector("#cancelManualMatch"),
   balanceTeams: document.querySelector("#balanceTeams"),
   seasonSelect: document.querySelector("#seasonSelect"),
   seasonForm: document.querySelector("#seasonForm"),
@@ -1084,8 +1088,23 @@ function renderSetup() {
     `;
   }).join("");
 
-  els.drawMatch.disabled = !profile.currentSeasonId || !teamKeys().every((key) => draft.teams[key].players.length > 0);
+  renderManualMatchChoice();
+  const canStartMatch = Boolean(profile.currentSeasonId) && teamKeys().every((key) => draft.teams[key].players.length > 0);
+  els.drawMatch.disabled = !canStartMatch;
+  els.chooseFirstMatch.disabled = !canStartMatch;
   els.balanceTeams.disabled = profile.players.length < 3;
+}
+
+function renderManualMatchChoice() {
+  const first = els.manualMatchForm.elements.firstTeam;
+  const second = els.manualMatchForm.elements.secondTeam;
+  const currentFirst = first.value;
+  const currentSecond = second.value;
+  const options = teamKeys().map((key) => `<option value="${key}">${escapeHtml(teamName(key))}</option>`).join("");
+  first.innerHTML = options;
+  second.innerHTML = options;
+  first.value = teamKeys().includes(currentFirst) ? currentFirst : teamKeys()[0];
+  second.value = teamKeys().includes(currentSecond) && currentSecond !== first.value ? currentSecond : teamKeys()[1];
 }
 
 function selectedPlayerRefs() {
@@ -1095,6 +1114,11 @@ function selectedPlayerRefs() {
 function availablePlayersForTeam(teamKey) {
   const selected = selectedPlayerRefs();
   return profile.players.filter((player) => !selected.includes(player.id));
+}
+
+function availableLatePlayers() {
+  const selected = new Set(selectedPlayerRefs());
+  return profile.players.filter((player) => !selected.has(player.id));
 }
 
 function renderPlayerSearchField({ name, placeholder, options, disabled = false, listId, optional = false, value = "" }) {
@@ -1389,7 +1413,10 @@ function renderTeamPanel(teamKey) {
   return `
     <div class="team-panel-head">
       <p class="eyebrow">Time ${meta.name}</p>
-      <button class="secondary-action compact-action" data-open-substitution="${teamKey}" type="button">Substituir</button>
+      <div class="team-panel-actions">
+        <button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>
+        <button class="secondary-action compact-action" data-open-substitution="${teamKey}" type="button">Substituir</button>
+      </div>
     </div>
     <button class="primary-action quick-goal" data-quick-goal="${teamKey}" type="button">+1 gol</button>
     <div class="score" data-score-team="${teamKey}">${score}</div>
@@ -1421,6 +1448,42 @@ function openSubstitutionPopup(teamKey) {
   els.goalPopupTitle.textContent = `Substituir no ${teamName(teamKey)}`;
   els.goalPopupSlot.innerHTML = renderLineupTeam(teamKey, "popup");
   els.goalPopup.classList.remove("hidden");
+}
+
+function openLatePlayerPopup(teamKey) {
+  if (!draft.currentMatch) return;
+  const options = availableLatePlayers();
+  activeMatchPopup = "late-player";
+  els.goalPopupTitle.textContent = `Adicionar ao ${teamName(teamKey)}`;
+  els.goalPopupSlot.innerHTML = options.length ? `
+    <form class="late-player-form" data-late-player-team="${teamKey}">
+      <p>O jogador sera adicionado definitivamente ao elenco deste time.</p>
+      <label>Jogador que chegou
+        ${renderPlayerSearchField({
+          name: "player",
+          placeholder: "Pesquisar jogador",
+          options,
+          listId: `late-player-${teamKey}`
+        })}
+      </label>
+      <button class="primary-action" type="submit">Adicionar ao time</button>
+    </form>
+  ` : `<p>Nenhum jogador cadastrado esta fora dos times. Cadastre o jogador na aba Jogadores antes de adiciona-lo.</p>`;
+  els.goalPopup.classList.remove("hidden");
+}
+
+function addLatePlayerFromForm(form) {
+  if (!form || !draft.currentMatch) return;
+  const teamKey = form.dataset.latePlayerTeam;
+  const ref = resolvePlayerSearch(form, "player");
+  if (!ref || !availableLatePlayers().some((player) => player.id === ref)) {
+    alert("Escolha um jogador cadastrado que ainda nao esteja em outro time.");
+    return;
+  }
+  draft.teams[teamKey].players.push(ref);
+  ensurePlayerStats(teamKey, ref);
+  closeGoalPopup();
+  render();
 }
 
 function renderLineupCheck() {
@@ -1499,7 +1562,13 @@ function renderBench() {
   const queue = draft.currentMatch?.benchQueue || draft.finishedMatch?.benchQueue || [benchTeamKey()].filter(Boolean);
   els.benchStrip.innerHTML = `
     <span class="bench-name">Fila de fora</span>
-    ${queue.length ? queue.map((teamKey, index) => `<span class="bench-team"><span class="swatch" style="background: ${teamColor(teamKey)}"></span>${index + 1}. ${escapeHtml(teamName(teamKey))}</span>`).join("") : "<span class=\"bench-team\">Sem banco</span>"}
+    ${queue.length ? queue.map((teamKey, index) => `
+      <span class="bench-team">
+        <span class="swatch" style="background: ${teamColor(teamKey)}"></span>
+        ${index + 1}. ${escapeHtml(teamName(teamKey))}
+        ${draft.currentMatch ? `<button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>` : ""}
+      </span>
+    `).join("") : "<span class=\"bench-team\">Sem banco</span>"}
   `;
 }
 
@@ -1832,6 +1901,20 @@ function startFirstMatch() {
   ensureDraftTeams();
   const order = shuffle(teamKeys());
   startMatch([order[0], order[1]], order.slice(2));
+}
+
+function startChosenFirstMatch(event) {
+  event.preventDefault();
+  const first = els.manualMatchForm.elements.firstTeam.value;
+  const second = els.manualMatchForm.elements.secondTeam.value;
+  if (!first || !second || first === second) {
+    alert("Escolha dois times diferentes para a primeira partida.");
+    return;
+  }
+  draft.seasonId = profile.currentSeasonId;
+  ensureDraftTeams();
+  const playing = [first, second];
+  startMatch(playing, teamKeys().filter((key) => !playing.includes(key)));
 }
 
 function balanceTeamsByPerformance() {
@@ -4815,6 +4898,13 @@ els.lineupCheck.addEventListener("click", (event) => {
 });
 
 els.drawMatch.addEventListener("click", startFirstMatch);
+els.chooseFirstMatch.addEventListener("click", () => {
+  els.manualMatchChoice.classList.remove("hidden");
+  renderManualMatchChoice();
+  els.manualMatchChoice.scrollIntoView({ behavior: "smooth", block: "center" });
+});
+els.cancelManualMatch.addEventListener("click", () => els.manualMatchChoice.classList.add("hidden"));
+els.manualMatchForm.addEventListener("submit", startChosenFirstMatch);
 els.balanceTeams.addEventListener("click", balanceTeamsByPerformance);
 els.startCountdown.addEventListener("click", startCountdown);
 els.fullScoreMode.addEventListener("click", toggleFullScoreMode);
@@ -4850,20 +4940,34 @@ els.undoLastGoal.addEventListener("click", undoLastGoal);
 els.leftPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-quick-goal]");
   if (button) openGoalPopup(button.dataset.quickGoal);
+  const latePlayer = event.target.closest("[data-add-late-player]");
+  if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
 });
 els.rightPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-quick-goal]");
   if (button) openGoalPopup(button.dataset.quickGoal);
+  const latePlayer = event.target.closest("[data-add-late-player]");
+  if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
+});
+els.benchStrip.addEventListener("click", (event) => {
+  const latePlayer = event.target.closest("[data-add-late-player]");
+  if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
 });
 els.closeGoalPopup.addEventListener("click", closeGoalPopup);
 els.goalPopup.addEventListener("click", (event) => {
   if (event.target === els.goalPopup) closeGoalPopup();
 });
 els.goalPopup.addEventListener("submit", (event) => {
+  const latePlayerForm = event.target.closest("[data-late-player-team]");
+  if (latePlayerForm) {
+    event.preventDefault();
+    addLatePlayerFromForm(latePlayerForm);
+    return;
+  }
   const form = event.target.closest("[data-complete-team]");
   if (!form) return;
   event.preventDefault();

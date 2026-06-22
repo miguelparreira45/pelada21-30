@@ -150,9 +150,23 @@
             </div>
             <div class="section-actions">
               <button class="secondary-action" id="balanceTeams">Sugerir times equilibrados</button>
+              <button class="secondary-action" id="chooseFirstMatch">Escolher primeira partida</button>
               <button class="primary-action" id="drawMatch">Sortear primeira partida</button>
             </div>
           </div>
+          <section class="manual-match-choice hidden" id="manualMatchChoice">
+            <div>
+              <p class="eyebrow">Primeira partida</p>
+              <h3>Escolha os times que comecam jogando</h3>
+            </div>
+            <form class="manual-match-form" id="manualMatchForm">
+              <label>Primeiro time<select name="firstTeam" required></select></label>
+              <span class="manual-match-versus">x</span>
+              <label>Segundo time<select name="secondTeam" required></select></label>
+              <button class="primary-action" type="submit">Iniciar partida escolhida</button>
+              <button class="secondary-action" id="cancelManualMatch" type="button">Cancelar</button>
+            </form>
+          </section>
           <div class="teams-grid" id="teamsGrid"></div>
         </section>
 
