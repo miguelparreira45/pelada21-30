@@ -18,6 +18,11 @@
   box-sizing: border-box;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -30,6 +35,15 @@ button,
 input,
 select {
   font: inherit;
+}
+
+button,
+input,
+select,
+textarea,
+a,
+[role="button"] {
+  touch-action: manipulation;
 }
 
 button {
@@ -274,6 +288,11 @@ select {
   padding: 0 12px;
   background: #080a08;
   color: var(--ink);
+  font-size: 16px;
+}
+
+textarea {
+  font-size: 16px;
 }
 
 .password-wrap {
@@ -1773,7 +1792,7 @@ p {
   textarea {
     min-height: 40px;
     padding: 9px 10px;
-    font-size: 14px;
+    font-size: 16px;
   }
 
   label {
