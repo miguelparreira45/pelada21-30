@@ -19,6 +19,12 @@ create table if not exists public.pelada_profiles (
 alter table public.pelada_profiles
   add column if not exists email text;
 
+alter table public.pelada_profiles
+  add column if not exists finance jsonb not null default '{"settings":{"monthlyAmount":0,"substituteAmount":0,"monthlyFrequency":"mensal","monthlyChargeDay":10,"pixKey":"","cashInitial":0},"payments":[],"cashEntries":[],"expenses":[],"publicShares":{}}'::jsonb;
+
+alter table public.pelada_profiles
+  add column if not exists draft jsonb not null default '{}'::jsonb;
+
 create unique index if not exists pelada_profiles_email_unique
 on public.pelada_profiles (lower(email));
 
@@ -56,6 +62,9 @@ create table if not exists public.players (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.players
+  add column if not exists whatsapp text;
 
 create table if not exists public.sessions (
   id uuid primary key default gen_random_uuid(),

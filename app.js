@@ -229,7 +229,7 @@ async function loadCloudProfile(user) {
     seasons: mappedSeasons,
     players: (players || []).map(fromPlayerRow),
     sessions: mappedSessions,
-    draft: newDraft()
+    draft: profileRow.draft || newDraft()
   });
 }
 
@@ -319,14 +319,21 @@ async function createCloudProfile(user, payload) {
 
 async function saveCloudState() {
   if (!isCloudMode || !profile || !currentUser) return;
-  await supabaseClient.from("pelada_profiles").update({
+  const profilePayload = {
     pelada_name: profile.peladaName,
     username: profile.username,
     email: profile.email,
     phone: profile.phone,
     current_season_id: profile.currentSeasonId,
-    finance: profile.finance || DEFAULT_FINANCE
-  }).eq("id", currentUser.id);
+    finance: profile.finance || DEFAULT_FINANCE,
+    draft: profile.draft || draft || newDraft()
+  };
+  let { error: profileSaveError } = await supabaseClient.from("pelada_profiles").update(profilePayload).eq("id", currentUser.id);
+  if (profileSaveError && String(profileSaveError.message || "").toLowerCase().includes("draft")) {
+    const { draft: _draft, ...fallbackPayload } = profilePayload;
+    ({ error: profileSaveError } = await supabaseClient.from("pelada_profiles").update(fallbackPayload).eq("id", currentUser.id));
+  }
+  if (profileSaveError) throw profileSaveError;
 
   await Promise.all(profile.sessions.map((session) =>
     supabaseClient.from("sessions").upsert(toSessionRow(session))
@@ -1402,6 +1409,7 @@ function tiedLeaders(stats, field) {
 }
 
 function renderMatch() {
+  syncCurrentMatchClock();
   const match = draft.currentMatch;
   const [left, right] = match.playing;
   els.matchLabel.textContent = `Partida ${draft.matchNumber}`;
@@ -1425,6 +1433,11 @@ function renderMatch() {
   startTimer();
 }
 
+function persistNow() {
+  if (profile && draft) profile.draft = draft;
+  localStorage.setItem(STORE_KEY, JSON.stringify(store));
+}
+
 function toggleFullScoreMode() {
   els.matchView.classList.toggle("full-score");
   render();
@@ -1441,9 +1454,7 @@ function renderTeamPanel(teamKey) {
     <div class="team-panel-head">
       <p class="eyebrow">Time ${meta.name}</p>
       <div class="team-panel-actions">
-        <button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>
-        <button class="secondary-action compact-action" data-remove-team-player="${teamKey}" type="button">- Jogador</button>
-        <button class="secondary-action compact-action" data-open-substitution="${teamKey}" type="button">Substituir</button>
+        <button class="secondary-action compact-action" data-open-roster="${teamKey}" type="button">Elenco</button>
       </div>
     </div>
     <button class="primary-action quick-goal" data-quick-goal="${teamKey}" type="button">+1 gol</button>
@@ -1533,6 +1544,55 @@ function openRemovePlayerPopup(teamKey) {
       <button class="danger-action" type="submit">Retirar jogador</button>
     </form>
   ` : `<p>Este time nao possui jogadores no elenco-base.</p>`;
+  els.goalPopup.classList.remove("hidden");
+}
+
+function openRosterPopup(teamKey) {
+  if (!draft.currentMatch) return;
+  const lateOptions = availableLatePlayers();
+  const removeOptions = draft.teams[teamKey]?.players || [];
+  activeMatchPopup = "roster";
+  els.goalPopupTitle.textContent = `Elenco do ${teamName(teamKey)}`;
+  els.goalPopupSlot.innerHTML = `
+    <div class="roster-tools">
+      <section class="roster-tool-card">
+        <h3>Adicionar jogador</h3>
+        ${lateOptions.length ? `
+          <form class="late-player-form" data-late-player-team="${teamKey}">
+            <label>Quem chegou
+              ${renderPlayerSearchField({
+                name: "player",
+                placeholder: "Pesquisar jogador",
+                options: lateOptions,
+                listId: `roster-late-player-${teamKey}`
+              })}
+            </label>
+            <button class="primary-action" type="submit">Adicionar</button>
+          </form>
+        ` : `<p>Todos os jogadores cadastrados ja estao em algum time.</p>`}
+      </section>
+      <section class="roster-tool-card">
+        <h3>Retirar jogador</h3>
+        ${removeOptions.length ? `
+          <form class="late-player-form" data-remove-player-team="${teamKey}">
+            <label>Quem saiu
+              ${renderPlayerSearchField({
+                name: "player",
+                placeholder: "Pesquisar jogador",
+                options: removeOptions,
+                listId: `roster-remove-player-${teamKey}`
+              })}
+            </label>
+            <button class="danger-action" type="submit">Retirar</button>
+          </form>
+        ` : `<p>Este time nao possui jogadores no elenco-base.</p>`}
+      </section>
+      <section class="roster-tool-card roster-tool-card-wide">
+        <h3>Completar ou substituir</h3>
+        ${renderLineupTeam(teamKey, "roster")}
+      </section>
+    </div>
+  `;
   els.goalPopup.classList.remove("hidden");
 }
 
@@ -1638,8 +1698,7 @@ function renderBench() {
         <span class="swatch" style="background: ${teamColor(teamKey)}"></span>
         ${index + 1}. ${escapeHtml(teamName(teamKey))}
         ${draft.currentMatch ? `
-          <button class="secondary-action compact-action" data-add-late-player="${teamKey}" type="button">+ Jogador</button>
-          <button class="secondary-action compact-action" data-remove-team-player="${teamKey}" type="button">- Jogador</button>
+          <button class="secondary-action compact-action" data-open-roster="${teamKey}" type="button">Elenco</button>
         ` : ""}
       </span>
     `).join("") : "<span class=\"bench-team\">Sem banco</span>"}
@@ -1849,26 +1908,26 @@ function renderLoanResolutionItem(item, match) {
     .join("");
   return `
     <form class="loan-resolution-card" data-loan-team="${item.teamKey}" data-loan-ref="${item.ref}" data-base-team="${item.baseTeam}">
-      <p><strong>${escapeHtml(playerDisplayName(item.ref))}</strong> estava completando o time <strong>${escapeHtml(teamName(item.teamKey, match))}</strong>. Ele vai voltar para o time base?</p>
+      <p><strong>${escapeHtml(playerDisplayName(item.ref))}</strong> completou o <strong>${escapeHtml(teamName(item.teamKey, match))}</strong>. Agora ele fica em qual time?</p>
       <div class="loan-options">
         <label>
-          Sim, ele volta. Quem completa ${escapeHtml(teamName(item.teamKey, match))}?
+          Ele volta para o ${escapeHtml(teamName(item.baseTeam, match))}. Alguem completa o ${escapeHtml(teamName(item.teamKey, match))} agora?
           <select name="returnReplacement">
             <option value="">Ninguem por enquanto</option>
             ${returnOptions}
           </select>
         </label>
-        <button class="secondary-action" name="decision" value="return" type="submit">Volta para base</button>
+        <button class="secondary-action" name="decision" value="return" type="submit">Fica no ${escapeHtml(teamName(item.baseTeam, match))}</button>
       </div>
       <div class="loan-options">
         <label>
-          Nao, ele continua. Quem completa ${escapeHtml(teamName(item.baseTeam, match))}?
+          Ele fica no ${escapeHtml(teamName(item.teamKey, match))}. Alguem completa o ${escapeHtml(teamName(item.baseTeam, match))} agora?
           <select name="baseReplacement">
             <option value="">Ninguem por enquanto</option>
             ${baseOptions}
           </select>
         </label>
-        <button class="primary-action" name="decision" value="stay" type="submit">Continua completando</button>
+        <button class="primary-action" name="decision" value="stay" type="submit">Fica no ${escapeHtml(teamName(item.teamKey, match))}</button>
       </div>
     </form>
   `;
@@ -1958,16 +2017,46 @@ function renderFinalSummary() {
 function startTimer() {
   if (draft.mode !== "match" || !draft.currentMatch?.isRunning) return;
   timerId = setInterval(() => {
-    if (!draft.currentMatch) return clearInterval(timerId);
-    draft.currentMatch.remaining -= 1;
-    if (draft.currentMatch.remaining <= 0 && !draft.currentMatch.isTimeUp) {
-      draft.currentMatch.isTimeUp = true;
-      render();
+    if (!draft.currentMatch) {
+      clearInterval(timerId);
+      timerId = null;
       return;
     }
-    els.timer.textContent = formatClock(draft.currentMatch.remaining);
-    saveStore();
+    const becameTimeUp = syncCurrentMatchClock();
+    if (els.timer) els.timer.textContent = formatClock(draft.currentMatch.remaining);
+    persistNow();
+    if (becameTimeUp) render();
   }, 1000);
+}
+
+function syncCurrentMatchClock() {
+  const match = draft?.currentMatch;
+  if (!match?.isRunning || !match.timerEndsAt) return false;
+  const secondsLeft = Math.ceil((new Date(match.timerEndsAt).getTime() - Date.now()) / 1000);
+  const becameTimeUp = secondsLeft <= 0 && !match.isTimeUp;
+  match.remaining = secondsLeft;
+  if (becameTimeUp) {
+    match.isTimeUp = true;
+    notifyTimeUp(match);
+  }
+  return becameTimeUp;
+}
+
+function notifyTimeUp(match) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  try {
+    new Notification("Tempo da partida acabou", {
+      body: `${formatScoreLine(match, match)}. Encerre quando a bola sair.`,
+      icon: "peladafast-logo.png"
+    });
+  } catch {
+    // Navegadores moveis podem bloquear notificacoes quando a pagina esta suspensa.
+  }
+}
+
+function requestTimerNotificationPermission() {
+  if (!("Notification" in window) || Notification.permission !== "default") return;
+  Notification.requestPermission().catch(() => {});
 }
 
 function startFirstMatch() {
@@ -2095,11 +2184,14 @@ function startMatch(playing, bench) {
     out: { [playing[0]]: [], [playing[1]]: [] },
     goals: [],
     remaining: durationMinutes * 60,
+    initialRemaining: durationMinutes * 60,
     durationMinutes,
     goalLimit,
     teamStreaks: { ...draft.teamStreaks },
     isRunning: false,
     isTimeUp: false,
+    timerStartedAt: "",
+    timerEndsAt: "",
     startedAt: new Date().toISOString()
   };
   applyPendingComplementsToCurrentMatch();
@@ -2111,7 +2203,11 @@ function startMatch(playing, bench) {
 
 function startCountdown() {
   if (!draft.currentMatch || draft.currentMatch.isRunning) return;
+  const remaining = Number(draft.currentMatch.remaining) || matchDurationSeconds(draft.currentMatch);
   draft.currentMatch.isRunning = true;
+  draft.currentMatch.timerStartedAt = new Date().toISOString();
+  draft.currentMatch.timerEndsAt = new Date(Date.now() + remaining * 1000).toISOString();
+  requestTimerNotificationPermission();
   render();
 }
 
@@ -2202,6 +2298,7 @@ function editGoalAt(index) {
 }
 
 function finishCurrentMatch(reason, forcedWinner = null) {
+  syncCurrentMatchClock();
   clearInterval(timerId);
   const match = draft.currentMatch;
   const [a, b] = match.playing;
@@ -4950,7 +5047,7 @@ function completeTeamFromForm(form) {
     draft.currentMatch.guests[teamKey].push(ref);
   }
   ensurePlayerStats(teamKey, ref);
-  if (activeMatchPopup === "substitution") closeGoalPopup();
+  if (activeMatchPopup === "substitution" || activeMatchPopup === "roster") closeGoalPopup();
   render();
 }
 
@@ -5021,6 +5118,8 @@ els.leftPanel.addEventListener("click", (event) => {
   if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
+  const roster = event.target.closest("[data-open-roster]");
+  if (roster) openRosterPopup(roster.dataset.openRoster);
 });
 els.rightPanel.addEventListener("click", (event) => {
   const button = event.target.closest("[data-quick-goal]");
@@ -5031,12 +5130,16 @@ els.rightPanel.addEventListener("click", (event) => {
   if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
   const substitution = event.target.closest("[data-open-substitution]");
   if (substitution) openSubstitutionPopup(substitution.dataset.openSubstitution);
+  const roster = event.target.closest("[data-open-roster]");
+  if (roster) openRosterPopup(roster.dataset.openRoster);
 });
 els.benchStrip.addEventListener("click", (event) => {
   const latePlayer = event.target.closest("[data-add-late-player]");
   if (latePlayer) openLatePlayerPopup(latePlayer.dataset.addLatePlayer);
   const removePlayer = event.target.closest("[data-remove-team-player]");
   if (removePlayer) openRemovePlayerPopup(removePlayer.dataset.removeTeamPlayer);
+  const roster = event.target.closest("[data-open-roster]");
+  if (roster) openRosterPopup(roster.dataset.openRoster);
 });
 els.closeGoalPopup.addEventListener("click", closeGoalPopup);
 els.goalPopup.addEventListener("click", (event) => {
@@ -5077,6 +5180,25 @@ document.addEventListener("click", (event) => {
     return;
   }
   if (!event.target.closest("[data-player-search-control]")) closePlayerSearchOptions();
+});
+
+window.addEventListener("beforeunload", () => {
+  syncCurrentMatchClock();
+  persistNow();
+});
+
+window.addEventListener("pagehide", () => {
+  syncCurrentMatchClock();
+  persistNow();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    syncCurrentMatchClock();
+    persistNow();
+    return;
+  }
+  if (draft?.currentMatch) render();
 });
 els.closeFinanceEditPopup?.addEventListener("click", closeFinanceEditPopup);
 els.financeEditPopup?.addEventListener("click", (event) => {
